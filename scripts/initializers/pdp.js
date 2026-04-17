@@ -88,7 +88,7 @@ await initializeDropin(async () => {
     return loadErrorPage();
   }
 
-  const ssrData = window.__INITIAL_DATA__?.[`PDP:${sku}`];
+  const ssrData = window.__INITIAL_DATA__?.[`PDP:${sku}`]?.product;
 
   const [product, labels] = await Promise.all([
     (ssrData ? Promise.resolve(ssrData) : fetchProductData(sku, { optionsUIDs, skipTransform: true })).then(preloadImageMiddleware),
