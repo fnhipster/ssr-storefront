@@ -262,6 +262,6 @@ export default defineInjector({
   inject: [
     jsonLd((data, ctx) => buildCategoryJsonLdGraph(data, ctx)),
     metadata((data, ctx) => buildCategoryMetadata(data, ctx)),
-    block(BLOCK_CLASS, (data) => buildCategoryBlockRows(data), { strategy: 'replace' }),
+    block(BLOCK_CLASS, (data) => buildCategoryBlockRows(data), { strategy: 'append' }),
   ],
 });
