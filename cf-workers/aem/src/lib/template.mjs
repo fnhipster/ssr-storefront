@@ -142,6 +142,32 @@ export function findBlockInnerBoundaries(html, blockClass) {
 }
 
 /**
+ * Reads the text content of a labelled row inside an AEM block.
+ *
+ * Useful for extracting authoring-time configuration from a block before its
+ * content is replaced by an injector (e.g. reading `urlpath` from the
+ * `product-list-page` block before overwriting it with server-rendered rows).
+ *
+ * @param {string} html - Full page HTML
+ * @param {string} blockClass - AEM block class name (e.g. `'product-list-page'`)
+ * @param {string} label - Row label to look for (case-insensitive)
+ * @returns {string|null} Trimmed text content of the value cell, or null if not found
+ */
+export function extractBlockRowValue(html, blockClass, label) {
+  const bounds = findBlockInnerBoundaries(html, blockClass);
+  if (!bounds) return null;
+  const inner = html.slice(bounds.openTagEnd, bounds.closeTagStart);
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(
+    `<div>\\s*<div>${escaped}<\\/div>\\s*<div>([\\s\\S]*?)<\\/div>`,
+    'i',
+  );
+  const m = inner.match(re);
+  if (!m) return null;
+  return m[1].replace(/<[^>]+>/g, '').trim() || null;
+}
+
+/**
  * Injects rendered block rows into an AEM block identified by its class name.
  *
  * @param {string} html - The full page HTML

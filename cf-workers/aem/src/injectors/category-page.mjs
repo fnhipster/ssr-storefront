@@ -1,37 +1,42 @@
 /**
- * Category / PLP injector
+ * Category / PLP Injector
  *
  * Detects product listing pages (`<meta name="template" content="plp">`), runs a
- * minimal Catalog Services `productSearch` query, and injects JSON-LD @graph
- * (ItemList + BreadcrumbList), meta tags, and SSR rows into `product-list-page`.
- * No initial-data script.
+ * minimal Catalog Services `productSearch` query, and injects:
+ *   - JSON-LD @graph (ItemList + BreadcrumbList)
+ *   - SEO & Open Graph meta tags
+ *   - Server-rendered product cards into the product-list-page block
  *
- * `urlpath` for the category filter is read from the AEM block (label `urlpath`)
- * before the block body is replaced.
+ * The `urlpath` for the category filter is read from the AEM block (label
+ * `urlpath`) before the block body is replaced.
  */
 import { ProductView } from '@dropins/storefront-product-discovery/fragments.js';
 import {
-  escapeHtml,
-  findBlockInnerBoundaries,
-  injectIntoBlock,
-} from '../lib/template.mjs';
+  defineInjector, jsonLd, metadata, block,
+} from '../lib/injector.mjs';
+import { fetchCommerce, buildAvailability, formatOfferPrice } from '../lib/commerce.mjs';
+import { extractBlockRowValue } from '../lib/template.mjs';
+import { buildCardHtml, buildCardListRows } from '../lib/block-list.mjs';
+import { absoluteUrl, titleCaseSegment } from '../lib/url.mjs';
 import { formatPrice } from '../lib/html.mjs';
-import { injectJsonLd } from '../lib/jsonld.mjs';
-import { injectMetadataTags } from '../lib/metadata.mjs';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const PLP_TEMPLATE_META = '<meta name="template" content="plp">';
 const BLOCK_CLASS = 'product-list-page';
+const JSON_LD_LIST_FRAGMENT = '#list';
 
 const VISIBILITY_FILTER = {
   attribute: 'visibility',
   in: ['Search', 'Catalog, Search'],
 };
 
-/** Fields required for schema.org ItemList / Product entries only. */
+// ---------------------------------------------------------------------------
+// GraphQL
+// ---------------------------------------------------------------------------
+
+/** Fields required for schema.org ItemList / Product entries. */
 const CATEGORY_PRODUCT_SEARCH = /* GraphQL */ `
   query categoryProductSearch(
     $phrase: String!
@@ -56,70 +61,12 @@ const CATEGORY_PRODUCT_SEARCH = /* GraphQL */ `
     }
   }
   ${ProductView}
-`.replace(/\s+/g, ' ').trim();
-
-const JSON_LD_LIST_FRAGMENT = '#list';
+`;
 
 // ---------------------------------------------------------------------------
-// HTML helpers
+// Data mapping
 // ---------------------------------------------------------------------------
 
-/**
- * @param {string} html
- * @param {string} blockClass
- * @param {string} label - Row label cell text (e.g. urlpath)
- * @returns {string|null}
- */
-function extractBlockRowValue(html, blockClass, label) {
-  const bounds = findBlockInnerBoundaries(html, blockClass);
-  if (!bounds) return null;
-  const inner = html.slice(bounds.openTagEnd, bounds.closeTagStart);
-  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(
-    `<div>\\s*<div>${escaped}<\\/div>\\s*<div>([\\s\\S]*?)<\\/div>`,
-    'i',
-  );
-  const m = inner.match(re);
-  if (!m) return null;
-  return m[1].replace(/<[^>]+>/g, '').trim() || null;
-}
-
-function absoluteUrl(origin, pathOrUrl) {
-  if (!pathOrUrl) return '';
-  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
-  if (!origin) return pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
-  const base = origin.replace(/\/$/, '');
-  const p = pathOrUrl.startsWith('/') ? pathOrUrl : `/${pathOrUrl}`;
-  return `${base}${p}`;
-}
-
-function titleCaseSegment(segment) {
-  return segment
-    .split(/[-_/]/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
-}
-
-function formatOfferPrice(value) {
-  if (value == null || Number.isNaN(Number(value))) return '';
-  return Number(value).toFixed(2);
-}
-
-function buildAvailability(inStock) {
-  return inStock
-    ? 'https://schema.org/InStock'
-    : 'https://schema.org/OutOfStock';
-}
-
-// ---------------------------------------------------------------------------
-// Data fetching
-// ---------------------------------------------------------------------------
-
-/**
- * @param {object} pv - productView from productSearch.items[].productView
- * @param {string} origin
- */
 function mapProductViewForLd(pv, origin) {
   if (!pv) return null;
   const amount = pv.__typename === 'ComplexProductView'
@@ -141,26 +88,81 @@ function mapProductViewForLd(pv, origin) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Data fetching
+// ---------------------------------------------------------------------------
+
 /**
- * @param {string} origin - e.g. https://www.example.com (from request)
- * @param {string} pathname - URL pathname
- * @param {string} categoryPath - categoryPath filter (from block urlpath)
- * @param {{ name: string, products: object[], totalCount: number, _placeholder?: boolean }} data
+ * Fetches category product data, falling back to a placeholder when the
+ * Commerce endpoint is unavailable or returns an error.
+ *
+ * Never returns null — the placeholder ensures the injector always runs its
+ * transforms (block replacement, meta, JSON-LD) even in degraded state.
+ *
+ * @param {{ html: string, pathname: string, env: object, origin: string }} ctx
+ * @returns {Promise<CategoryPagePayload>}
  */
-function buildCategoryJsonLdGraph(origin, pathname, categoryPath, data) {
+async function fetchCategoryPageData({ html, pathname, env, origin }) {
+  const urlpath = extractBlockRowValue(html, BLOCK_CLASS, 'urlpath');
+  const categoryPath = urlpath || pathname.replace(/^\//, '') || '';
+
+  const placeholderData = () => ({
+    category: {
+      name: titleCaseSegment(categoryPath.split('/').pop() || 'Category'),
+      path: pathname || '/',
+      urlpath: categoryPath,
+    },
+    products: [],
+    totalCount: 0,
+  });
+
+  const data = await fetchCommerce(CATEGORY_PRODUCT_SEARCH, {
+    phrase: '',
+    pageSize: 8,
+    currentPage: 1,
+    filter: [
+      { attribute: 'categoryPath', eq: categoryPath },
+      VISIBILITY_FILTER,
+    ],
+    sort: [{ attribute: 'position', direction: 'DESC' }],
+  }, env);
+
+  if (!data) return placeholderData();
+
+  const ps = data?.productSearch;
+  const items = ps?.items || [];
+  const totalCount = ps?.total_count ?? 0;
+
+  const products = items
+    .map((row) => mapProductViewForLd(row?.productView, origin))
+    .filter(Boolean);
+
+  const categoryName = titleCaseSegment(
+    categoryPath.split('/').filter(Boolean).pop()
+      || pathname.split('/').filter(Boolean).pop()
+      || 'Category',
+  );
+
+  return {
+    category: { name: categoryName, path: pathname || '/', urlpath: categoryPath },
+    products,
+    totalCount,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// JSON-LD
+// ---------------------------------------------------------------------------
+
+function buildCategoryJsonLdGraph(data, { origin, pathname }) {
+  const { category, products, totalCount } = data;
   const path = pathname || '/';
   const base = origin.replace(/\/$/, '');
   const pageUrl = absoluteUrl(origin, path);
   const listId = `${pageUrl}${JSON_LD_LIST_FRAGMENT}`;
-  const categoryTitle = data.category?.name
-    || titleCaseSegment(categoryPath.split('/').filter(Boolean).pop() || 'Category');
 
-  const itemListElement = data.products.map((p, i) => {
-    const item = {
-      '@type': 'Product',
-      name: p.name,
-      url: p.url,
-    };
+  const itemListElement = products.map((p, i) => {
+    const item = { '@type': 'Product', name: p.name, url: p.url };
     if (p.image) item.image = p.image;
     if (p.price) {
       item.offers = {
@@ -170,22 +172,11 @@ function buildCategoryJsonLdGraph(origin, pathname, categoryPath, data) {
         availability: p.availability,
       };
     }
-    return {
-      '@type': 'ListItem',
-      position: i + 1,
-      item,
-    };
+    return { '@type': 'ListItem', position: i + 1, item };
   });
 
   const pathParts = path.split('/').filter(Boolean);
-  const breadcrumbItems = [
-    {
-      '@type': 'ListItem',
-      position: 1,
-      name: 'Home',
-      item: `${base}/`,
-    },
-  ];
+  const breadcrumbItems = [{ '@type': 'ListItem', position: 1, name: 'Home', item: `${base}/` }];
   let acc = '';
   pathParts.forEach((part) => {
     acc += `/${part}`;
@@ -203,10 +194,10 @@ function buildCategoryJsonLdGraph(origin, pathname, categoryPath, data) {
       {
         '@type': 'ItemList',
         '@id': listId,
-        name: categoryTitle,
-        description: `${categoryTitle} category at AEM Shop.`,
+        name: category.name,
+        description: `${category.name} category at AEM Shop.`,
         url: pageUrl,
-        numberOfItems: data.totalCount,
+        numberOfItems: totalCount,
         itemListOrder: 'https://schema.org/ItemListOrderAscending',
         itemListElement,
       },
@@ -218,177 +209,36 @@ function buildCategoryJsonLdGraph(origin, pathname, categoryPath, data) {
   };
 }
 
-/**
- * @param {string} html
- * @param {string} pathname
- * @param {object} env
- * @param {string} origin
- * @returns {Promise<CategoryPagePayload>}
- */
-async function fetchCategoryPageData(html, pathname, env, origin) {
-  const urlpath = extractBlockRowValue(html, BLOCK_CLASS, 'urlpath');
-  const categoryPath = urlpath || pathname.replace(/^\//, '') || '';
-
-  if (!env.COMMERCE_GRAPHQL_ENDPOINT) {
-    return {
-      _placeholder: true,
-      category: {
-        name: titleCaseSegment(categoryPath.split('/').pop() || 'Category'),
-        path: pathname || '/',
-        urlpath: categoryPath,
-      },
-      products: [],
-      totalCount: 0,
-    };
-  }
-
-  const params = new URLSearchParams({
-    query: CATEGORY_PRODUCT_SEARCH,
-    variables: JSON.stringify({
-      phrase: '',
-      pageSize: 8,
-      currentPage: 1,
-      filter: [
-        { attribute: 'categoryPath', eq: categoryPath },
-        VISIBILITY_FILTER,
-      ],
-      sort: [{ attribute: 'position', direction: 'DESC' }],
-    }),
-  });
-
-  const url = `${env.COMMERCE_GRAPHQL_ENDPOINT}?${params}`;
-  const response = await fetch(url, {
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': env.COMMERCE_API_KEY,
-      'magento-customer-group': env.MAGENTO_CUSTOMER_GROUP,
-      'magento-environment-id': env.MAGENTO_ENVIRONMENT_ID,
-      'magento-store-code': env.MAGENTO_STORE_CODE,
-      'magento-store-view-code': env.MAGENTO_STORE_VIEW_CODE,
-      'magento-website-code': env.MAGENTO_WEBSITE_CODE,
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    console.error(`Category productSearch error: ${response.status}`, body);
-    return {
-      _placeholder: true,
-      category: {
-        name: titleCaseSegment(categoryPath.split('/').pop() || 'Category'),
-        path: pathname || '/',
-        urlpath: categoryPath,
-      },
-      products: [],
-      totalCount: 0,
-    };
-  }
-
-  const { data, errors } = await response.json();
-  if (errors?.length) {
-    console.error('Category productSearch GraphQL errors:', JSON.stringify(errors));
-  }
-
-  const ps = data?.productSearch;
-  const items = ps?.items || [];
-  const totalCount = ps?.total_count ?? 0;
-
-  const products = items
-    .map((row) => mapProductViewForLd(row?.productView, origin))
-    .filter(Boolean);
-
-  const categoryName = titleCaseSegment(
-    categoryPath.split('/').filter(Boolean).pop() || pathname.split('/').filter(Boolean).pop() || 'Category',
-  );
-
-  return {
-    _placeholder: false,
-    category: {
-      name: categoryName,
-      path: pathname || '/',
-      urlpath: categoryPath,
-    },
-    products,
-    totalCount,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Metadata
 // ---------------------------------------------------------------------------
 
-function buildCategoryMetadata(data, pageUrl) {
+function buildCategoryMetadata(data, { origin, pathname }) {
   const { category } = data;
-  const title = `${category.name} | Shop`;
+  const title = category.name;
 
   return [
     ['name', 'title', title],
     ['name', 'description', `${category.name} category at AEM Shop.`],
     ['property', 'og:title', title],
     ['property', 'og:type', 'website'],
-    ['property', 'og:url', pageUrl],
+    ['property', 'og:url', absoluteUrl(origin, pathname || '/')],
   ];
 }
 
-/**
- * @param {{ name: string, url: string, image: string, price: string, priceCurrency: string }} p
- * @returns {string}
- */
-function buildCategoryProductCardHtml(p) {
-  const name = escapeHtml(p.name);
-  const href = escapeHtml(p.url);
-  const priceHtml = p.price
-    ? escapeHtml(formatPrice(Number(p.price), p.priceCurrency))
-    : '';
-  const imageHtml = p.image
-    ? `<a href="${href}"><img src="${escapeHtml(p.image)}" alt="${name}" loading="lazy" width="240" height="300"></a>`
-    : '';
+// ---------------------------------------------------------------------------
+// Block HTML
+// ---------------------------------------------------------------------------
 
-  return `<article>
-  <div>${imageHtml}</div>
-  <div>
-    <a href="${href}">${name}</a>
-    ${priceHtml ? `<p>${priceHtml}</p>` : ''}
-  </div>
-</article>`;
-}
+function buildCategoryBlockRows({ products }) {
+  const cards = products.map((p) => ({
+    name: p.name,
+    url: p.url,
+    image: p.image,
+    price: p.price ? formatPrice(Number(p.price), p.priceCurrency) : null,
+  }));
 
-function buildCategoryBlockRows(data) {
-  const {
-    category, products, totalCount, _placeholder,
-  } = data;
-
-  const rows = [
-    [
-      'Title',
-      `<h2>${escapeHtml(category.name)}</h2>`,
-    ],
-  ];
-
-  if (!products.length) {
-    const emptyMsg = _placeholder
-      ? 'Product list is not available from the catalog service.'
-      : 'No products in this category.';
-    rows.push([
-      'Products',
-      `<p>${escapeHtml(emptyMsg)}</p>`,
-    ]);
-    return rows;
-  }
-
-  const items = products
-    .map((p) => `<li>${buildCategoryProductCardHtml(p)}</li>`)
-    .join('\n');
-  const showing = totalCount > products.length
-    ? `<p>${escapeHtml(`Showing ${products.length} of ${totalCount}`)}</p>`
-    : '';
-
-  rows.push([
-    'Products',
-    `<ul>\n${items}\n</ul>${showing}`,
-  ]);
-
-  return rows;
+  return buildCardListRows(null, cards);
 }
 
 // ---------------------------------------------------------------------------
@@ -397,45 +247,20 @@ function buildCategoryBlockRows(data) {
 
 /**
  * @typedef {object} CategoryPagePayload
- * @property {boolean} [_placeholder]
  * @property {{ name: string, path: string, urlpath: string }} category
  * @property {object[]} products
  * @property {number} totalCount
  */
 
-/**
- * @param {Response} response
- * @param {string} pathname
- * @param {object} env
- * @param {string} [origin] - Request origin (e.g. https://localhost:8787) for absolute JSON-LD URLs
- * @returns {Promise<Response>}
- */
-export async function injectCategoryPage(response, pathname, env, origin = '') {
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('text/html')) {
-    return response;
-  }
-
-  let html = await response.text();
-  if (!html.includes(PLP_TEMPLATE_META)) {
-    return new Response(html, response);
-  }
-
-  const data = await fetchCategoryPageData(html, pathname, env, origin);
-  const pageUrl = absoluteUrl(origin, pathname || '/') || (pathname || '/');
-
-  const graphDoc = buildCategoryJsonLdGraph(
-    origin,
-    pathname || '/',
-    data.category.urlpath,
-    data,
-  );
-
-  const listId = graphDoc['@graph']?.[0]?.['@id'] || JSON_LD_LIST_FRAGMENT;
-
-  html = injectJsonLd(html, graphDoc, { dedupeContains: listId });
-  html = injectMetadataTags(html, buildCategoryMetadata(data, pageUrl));
-  html = injectIntoBlock(html, BLOCK_CLASS, buildCategoryBlockRows(data), { strategy: 'replace' });
-
-  return new Response(html, response);
-}
+export default defineInjector({
+  match: { template: 'plp' },
+  fetch: fetchCategoryPageData,
+  inject: [
+    jsonLd(
+      (data, ctx) => buildCategoryJsonLdGraph(data, ctx),
+      (schema) => ({ dedupeContains: schema['@graph']?.[0]?.['@id'] || JSON_LD_LIST_FRAGMENT }),
+    ),
+    metadata((data, ctx) => buildCategoryMetadata(data, ctx)),
+    block(BLOCK_CLASS, (data) => buildCategoryBlockRows(data), { strategy: 'replace' }),
+  ],
+});

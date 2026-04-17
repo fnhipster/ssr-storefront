@@ -12,8 +12,10 @@
 
 'use strict';
 
-import { injectProductDetails } from './injectors/product-details.mjs';
-import { injectCategoryPage } from './injectors/category-page.mjs';
+import pdpInjector from './injectors/product-details.mjs';
+import plpInjector from './injectors/category-page.mjs';
+
+const INJECTORS = [plpInjector, pdpInjector];
 
 const getExtension = (path) => {
   const basename = path.split('/').pop();
@@ -110,8 +112,11 @@ const handleRequest = async (request, env, ctx) => {
   }
   resp.headers.delete('age');
   resp.headers.delete('x-robots-tag');
-  resp = await injectCategoryPage(resp, url.pathname, env, url.origin);
-  resp = await injectProductDetails(resp, url.pathname, env);
+  const injectorCtx = { pathname: url.pathname, env, origin: url.origin };
+  for (const injector of INJECTORS) {
+    // eslint-disable-next-line no-await-in-loop
+    resp = await injector(resp, injectorCtx);
+  }
   return resp;
 };
 

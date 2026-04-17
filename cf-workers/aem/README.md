@@ -1,116 +1,291 @@
-# AEM Production Cloudflare Worker
+# AEM Cloudflare Worker — CDN-layer SSR
 
-A Cloudflare Worker that serves as a production CDN for the `ssr-storefront` AEM Edge Delivery Services site. Based on the official [adobe/aem-cloudflare-prod-worker](https://github.com/adobe/aem-cloudflare-prod-worker) template.
+A Cloudflare Worker that proxies AEM Edge Delivery responses and enriches them with server-side rendered content at the CDN edge, before the page reaches the browser.
 
-Beyond CDN proxying, the worker enhances product pages with server-side rendered content:
+The goal is to populate HTML that search engines and LLMs can read immediately — structured data, semantic markup, and meta tags — without waiting for client-side JavaScript to hydrate. The client framework takes over once it loads, replacing the SSR content with its own render.
 
-- **JSON-LD** structured data (schema.org Product) — `lib/jsonld.mjs`
-- **SEO meta tags** (title, description, keywords, Open Graph, product pricing) — `lib/metadata.mjs`
-- **Product HTML** injected into the `product-details` AEM block before JavaScript loads — `lib/template.mjs` (`injectIntoBlock` balances nested `<div>`s so the block wrapper is not truncated)
-- **Client bootstrap data** — `window.__INITIAL_DATA__["PDP:{sku}"]` via an inline script that reuses the page CSP nonce from the origin HTML — `lib/initial-data.mjs`
+Based on the official [adobe/aem-cloudflare-prod-worker](https://github.com/adobe/aem-cloudflare-prod-worker) template.
 
-## Project Structure
+---
+
+## How it works
+
+```
+Browser → Cloudflare Worker → AEM origin
+                ↓
+          [proxy response]
+                ↓
+          [run injectors]   ← enriches HTML for SEO / LLMs
+                ↓
+          [return to browser]
+```
+
+Each **injector** targets a specific page type (identified by a `<meta name="template">` tag), fetches data from Adobe Commerce, and injects into the HTML:
+
+- **JSON-LD** — schema.org structured data for search engines (`Product`, `ItemList`, `BreadcrumbList`)
+- **Meta tags** — `<title>`, description, keywords, Open Graph
+- **Block HTML** — minimal semantic markup inside AEM blocks, readable by crawlers and LLMs before JavaScript loads
+- **Initial data** — `window.__INITIAL_DATA__` bootstrap script for the client dropin (PDP only)
+
+---
+
+## Project structure
 
 ```
 src/
-  index.mjs                     # Worker entry: proxy, headers, then injectProductDetails()
-  lib/
-    template.mjs                  # AEM block rows + injectIntoBlock (depth-aware)
-    html.mjs                      # Shared HTML helpers (e.g. price formatting)
-    jsonld.mjs                    # JSON-LD script injection / replacement
-    metadata.mjs                  # Meta and <title> injection
-    initial-data.mjs              # __INITIAL_DATA__ script + nonce extraction
+  index.mjs              # Worker entry point: proxy logic, then injector pipeline
   injectors/
-    product-details.mjs           # Product page: GraphQL fetch, head + block injection
+    product-details.mjs  # PDP — product data → JSON-LD, meta, block HTML, initial data
+    category-page.mjs    # PLP — category products → JSON-LD @graph, meta, product list block
+  lib/
+    injector.mjs         # defineInjector() factory + transform helpers
+    commerce.mjs         # Adobe Commerce Catalog Services GraphQL client
+    block-list.mjs       # Card list block row builder
+    url.mjs              # absoluteUrl(), titleCaseSegment()
+    template.mjs         # AEM block HTML parser and injector
+    jsonld.mjs           # JSON-LD <script> injection
+    metadata.mjs         # <meta> and <title> injection
+    initial-data.mjs     # window.__INITIAL_DATA__ script injection
+    html.mjs             # formatPrice()
 ```
 
-### Adding a New Injector
+---
 
-Use one module under `src/injectors/` that (1) decides whether the HTML should be enhanced, (2) loads any remote data, (3) mutates the HTML string, and (4) returns a `Response`. Reuse the head/body helpers in `src/lib/` instead of hand-splicing tags.
+## Adding a new injector
 
-#### 1. Page gate
+### 1. Author the page template
 
-Decide how you recognize pages (exact substring, regex, pathname). `product-details.mjs` gates on `<meta name="template" content="pdp">` so only PDP HTML pays for a Catalog Services request. Early-out with `return new Response(html, response)` when the gate fails.
+In AEM, add a template meta tag to the page's `<head>` so the worker can identify it:
 
-#### 2. JSON-LD (`lib/jsonld.mjs`)
+```html
+<meta name="template" content="my-template">
+```
 
-- **`injectJsonLd(html, data)`** — Injects a `<script type="application/ld+json">` immediately before `</head>`.
-- **`data`** must be a plain object suitable for JSON-LD (include **`@type`** when you care about deduplication).
-- **Dedup:** If `data['@type']` is set, an existing JSON-LD block whose JSON contains that `"@type"` is removed first, then the new script is appended.
-- **`renderJsonLd(data)`** — Returns only the script string (useful for tests or custom placement).
+### 2. Create the injector file
+
+Use `defineInjector` from `lib/injector.mjs`. The framework handles the full lifecycle — HTML guard, template detection, data fetch, transform pipeline, and `Response` construction. You only write domain logic.
 
 ```js
-import { injectJsonLd } from '../lib/jsonld.mjs';
+// src/injectors/my-page.mjs
+import { defineInjector, jsonLd, metadata, block } from '../lib/injector.mjs';
 
-const jsonLd = {
+export default defineInjector({
+  // Only run on pages that carry this template meta tag
+  match: { template: 'my-template' },
+
+  // Optional: fetch remote data before transforms run.
+  // Receives { pathname, env, origin, html }.
+  // Return null to skip all transforms and pass the response through unchanged.
+  async fetch({ pathname, env }) {
+    return fetchMyData(pathname, env);
+  },
+
+  // Ordered list of transforms — each injects into <head> or into a named block.
+  inject: [
+    jsonLd((data)      => buildMyJsonLd(data)),
+    metadata((data, ctx) => buildMyMetadata(data, ctx)),
+    block('my-block', (data) => buildMyBlockRows(data), { strategy: 'replace' }),
+  ],
+});
+```
+
+### 3. Register in `index.mjs`
+
+Add the injector to the `INJECTORS` array. Injectors run in order; each one receives the `Response` from the previous:
+
+```js
+import myPageInjector from './injectors/my-page.mjs';
+
+const INJECTORS = [plpInjector, pdpInjector, myPageInjector];
+```
+
+That's it. No boilerplate, no `new Response(...)`, no content-type checks.
+
+---
+
+## Injector context
+
+Every `fetch` and transform function receives a context object:
+
+| Property | Type | Description |
+|---|---|---|
+| `pathname` | `string` | URL pathname of the request (e.g. `/women/tops`) |
+| `env` | `object` | Cloudflare Worker environment bindings (see [Environment Variables](#environment-variables)) |
+| `origin` | `string` | Request origin (e.g. `https://www.example.com`) |
+| `html` | `string` | Full HTML body — only available in `fetch`, not in transforms |
+
+---
+
+## Transform helpers
+
+All imported from `lib/injector.mjs`. Each returns a `(html, data, ctx) => string` function and is listed in the `inject` array.
+
+### `jsonLd(buildFn, optsFn?)`
+
+Injects a `<script type="application/ld+json">` before `</head>`. Deduplicates against any existing block with the same `@type`.
+
+```js
+jsonLd((data) => ({
   '@context': 'https://schema.org',
   '@type': 'WebPage',
-  name: 'Example',
-};
-
-html = injectJsonLd(html, jsonLd);
+  name: data.title,
+  url: data.url,
+}))
 ```
 
-Under a strict `script-src` policy, nonced scripts may be required for executable scripts; `application/ld+json` is often treated as data. If the browser blocks your JSON-LD script, align with your CSP (e.g. nonce on that tag) the same way as `initial-data.mjs` does for inline JS.
-
-#### 3. Meta tags and title (`lib/metadata.mjs`)
-
-- **`injectMetadataTags(html, tags)`** — Injects `<meta …>` before `</head>`.
-- **`tags`** is an array of **`[attr, key, content]`** tuples:
-  - **`attr`** — `'name'` or `'property'` (becomes `name="…"` or `property="…"` on the element).
-  - **`key`** — e.g. `'description'`, `'title'`, `'og:title'`, `'og:image'`.
-  - **`content`** — string (or other value stringified). **`null` / `''` / `false`** skips that tuple.
-- **Dedup:** For each tuple, an existing `<meta>` with the same `attr` + `key` is removed before new tags are injected.
-- **`<title>`:** A tuple **`['name', 'title', 'Your title']`** also replaces the first `<title>…</title>` in the document.
-- **`renderMetadataTags(tags)`** — Renders the meta HTML only (no injection).
+For `@graph` documents, the deduplication key must be derived from the built schema. Pass an optional second function:
 
 ```js
-import { injectMetadataTags } from '../lib/metadata.mjs';
-
-html = injectMetadataTags(html, [
-  ['name', 'title', 'PLP: Summer sale'],
-  ['name', 'description', 'Browse summer products.'],
-  ['property', 'og:title', 'Summer sale'],
-  ['property', 'og:url', pageUrl],
-  ['property', 'og:image', imageUrl],
-]);
+jsonLd(
+  (data, ctx) => buildCategoryJsonLdGraph(data, ctx),
+  (schema)    => ({ dedupeContains: schema['@graph']?.[0]?.['@id'] }),
+)
 ```
 
-#### 4. AEM block HTML (`lib/template.mjs`)
+### `metadata(buildFn)`
 
-- **`injectIntoBlock(html, blockClass, rows, options?)`** — Replaces or appends rows inside the outer `<div class="…blockClass…">` wrapper. **`rows`** is `[['Label', value], …]`; the helper calls **`renderBlock`** internally (do not wrap with `renderBlock` yourself).
-- **`options.strategy`** — `'replace'` (default) or `'append'`.
-- Nesting: the implementation **balances `<div>` depth** so inner block rows do not confuse the closing wrapper tag.
+Injects `<meta>` tags before `</head>`, removing any existing tag with the same `attr` + `key`. A `['name', 'title', value]` entry also replaces the `<title>` element.
 
 ```js
-import { injectIntoBlock } from '../lib/template.mjs';
-
-const BLOCK_CLASS = 'your-block-name';
-
-function buildRows(data) {
-  return [
-    ['Heading', data.title],
-    ['Count', String(data.count)],
-  ];
-}
-
-html = injectIntoBlock(html, BLOCK_CLASS, buildRows(data), { strategy: 'replace' });
+metadata((data, ctx) => [
+  ['name',     'title',       data.name],
+  ['name',     'description', data.description],
+  ['property', 'og:type',     'website'],
+  ['property', 'og:url',      absoluteUrl(ctx.origin, ctx.pathname)],
+  ['property', 'og:image',    null],  // null or '' → skipped
+])
 ```
 
-#### 5. Client bootstrap (`lib/initial-data.mjs`)
+### `block(blockClass, buildFn, opts?)`
 
-- **`injectInitialData(html, key, value)`** — Injects a short inline script before `</head>` that sets **`window.__INITIAL_DATA__[key]`** to a JSON-serializable **`value`**, using the **same CSP nonce** as other scripts on the page when Helix rewrites nonces.
+Injects rows into the named AEM block. Rows are `[label, value]` pairs rendered as nested `<div>` cells. The parser balances `<div>` depth so nested block content is never truncated.
 
-#### 6. `Response` entry shape and wiring
+Block HTML is rendered for **SEO and LLM consumption only** — keep markup minimal and semantic. The client dropin replaces this content once JavaScript loads.
 
-Export an async function that mirrors `injectProductDetails`: accept **`(response, pathname, env)`**, read **`response.text()`** only when `Content-Type` is HTML, run your gate, optionally `fetch` backends using **`env`**, then apply **`injectJsonLd` / `injectMetadataTags` / `injectIntoBlock` / `injectInitialData`** in whatever order you need, and return **`new Response(html, response)`** (clone status/headers from the origin response as today).
+```js
+block('my-block', (data) => [
+  ['Name',        data.name],
+  ['Description', data.description],
+  ['Image',       `<img src="${data.imageUrl}" alt="${data.name}">`],
+], { strategy: 'replace' })  // 'replace' (default) or 'append'
+```
 
-Register the function in **`src/index.mjs`** after the origin `fetch`, e.g. `resp = await injectYourFeature(resp, url.pathname, env);`, chaining multiple injectors if required.
+### `initialData(buildFn)`
+
+Injects `window.__INITIAL_DATA__[key] = value` as a CSP-safe inline script before `</head>`, reusing the page nonce. Use this to bootstrap client dropins with server-fetched data so they skip a redundant network request.
+
+```js
+initialData((data) => [`PDP:${data.product.sku}`, data])
+```
+
+---
+
+## Libraries
+
+### `lib/commerce.mjs`
+
+GraphQL client for Adobe Commerce Catalog Services. Uses GET requests so responses are CDN-cacheable. Applies all required Magento headers from `env` automatically. Query whitespace is collapsed before sending.
+
+```js
+import { fetchCommerce, buildAvailability, formatOfferPrice } from '../lib/commerce.mjs';
+
+// Returns the GraphQL `data` object, or null if the endpoint is not configured
+// or the request fails.
+const data = await fetchCommerce(MY_QUERY, { sku: 'ADB-123' }, env);
+if (!data) return null;
+
+// schema.org availability URL
+buildAvailability(true)   // → 'https://schema.org/InStock'
+buildAvailability(false)  // → 'https://schema.org/OutOfStock'
+
+// Fixed 2-decimal string for schema.org Offer.price
+formatOfferPrice(68)      // → '68.00'
+formatOfferPrice(null)    // → ''
+```
+
+### `lib/block-list.mjs`
+
+Builds AEM block rows for a list of linked cards. Use whenever a block contains a collection of items — product cards, article teasers, search results, etc.
+
+```js
+import { buildCardHtml, buildCardListRows } from '../lib/block-list.mjs';
+
+// Each item: { name, url, image?, price? }
+// price must be a pre-formatted display string (e.g. '$68.00')
+const rows = buildCardListRows(null, cards);
+
+// Optional title row
+const rows = buildCardListRows('Women', cards);
+
+// Custom card renderer
+const rows = buildCardListRows(null, cards, {
+  renderCard: ({ name, url }) => `<a href="${url}">${name}</a>`,
+});
+```
+
+**`buildCardHtml({ name, url, image?, price? })`** — default card renderer. Produces a single `<a>` containing an optional `<img>` and the product name, followed by an optional `<span>` for the price. No layout wrappers — intentionally minimal for SEO/LLM readability.
+
+**`buildCardListRows(title, items, opts?)`** — returns `[['Title', '<h2>…</h2>'], ['Products', '<ul>…</ul>']]`. Pass `null` as `title` to omit the title row.
+
+### `lib/url.mjs`
+
+```js
+import { absoluteUrl, titleCaseSegment } from '../lib/url.mjs';
+
+// Resolves a path against an origin. Already-absolute URLs pass through.
+absoluteUrl('https://example.com', '/products/hoodie')
+// → 'https://example.com/products/hoodie'
+
+absoluteUrl('https://example.com', 'https://cdn.example.com/img.jpg')
+// → 'https://cdn.example.com/img.jpg'
+
+// Converts a URL segment to a readable label
+titleCaseSegment('women-tops')   // → 'Women Tops'
+titleCaseSegment('new_arrivals') // → 'New Arrivals'
+```
+
+### `lib/template.mjs`
+
+Lower-level AEM block utilities. The `block` transform helper calls these internally; use them directly only when you need finer control.
+
+**`injectIntoBlock(html, blockClass, rows, opts?)`** — Replaces or appends `[label, value]` rows inside the named block wrapper. `opts.strategy` is `'replace'` (default) or `'append'`.
+
+**`extractBlockRowValue(html, blockClass, label)`** — Reads a text value from a labelled row inside a block *before* it is replaced. Useful for extracting authoring-time config (e.g. `urlpath`) before overwriting the block with server-rendered content.
+
+**`renderBlock(rows)`** / **`renderRow(label, value)`** — Render `[label, value]` pairs into AEM block HTML without injecting.
+
+**`escapeHtml(value)`** — Escapes `&`, `<`, `>`, `"`. Passes through strings that already contain HTML tags.
+
+### `lib/jsonld.mjs`
+
+**`injectJsonLd(html, data, opts?)`** — Injects a `<script type="application/ld+json">` before `</head>`.
+- Default dedup: removes any existing JSON-LD block whose JSON contains the same `"@type"`.
+- `{ dedupeContains: string }` — removes any JSON-LD block whose raw body includes the given string. Use for `@graph` documents that have no root `@type`.
+
+**`renderJsonLd(data)`** — Returns only the `<script>` tag string (useful for testing).
+
+### `lib/metadata.mjs`
+
+**`injectMetadataTags(html, tags)`** — Injects `<meta>` tags before `</head>`. For each tag, removes any existing `<meta>` with the same `attr` + `key` first. A `['name', 'title', …]` entry also replaces the `<title>` element.
+
+**`renderMetadataTags(tags)`** — Returns the rendered HTML string without injecting.
+
+### `lib/initial-data.mjs`
+
+**`injectInitialData(html, key, value)`** — Injects a `<script>` before `</head>` that sets `window.__INITIAL_DATA__[key] = value`. Automatically extracts the page's CSP nonce from the AEM response so the script is not blocked by `script-src 'nonce-…'` policies.
+
+**`extractCspNonceFromHtml(html)`** — Reads the nonce from `<meta property="csp-nonce">` or the first `<script nonce="…">` tag.
+
+### `lib/html.mjs`
+
+**`formatPrice(value, currency)`** — Formats a number as a locale-aware currency string using `Intl.NumberFormat` (e.g. `formatPrice(68, 'USD')` → `'$68.00'`).
+
+---
 
 ## Prerequisites
 
 - A [Cloudflare account](https://dash.cloudflare.com/sign-up) (free plan works)
-- [Node.js](https://nodejs.org/) (v18+)
+- [Node.js](https://nodejs.org/) v18+
 
 ## Setup
 
@@ -121,12 +296,9 @@ Register the function in **`src/index.mjs`** after the origin `fetch`, e.g. `res
 npx wrangler deploy
 ```
 
-3. Wrangler will open a browser to authenticate with your Cloudflare account on first run
-4. Once deployed, your worker is live at `https://aem-prod-worker.<your-account>.workers.dev`
+Wrangler will open a browser to authenticate on first run.
 
 ## Development
-
-Run the worker locally:
 
 ```bash
 npx wrangler dev
@@ -134,49 +306,48 @@ npx wrangler dev
 
 ## Logs
 
-Tail live production logs:
-
 ```bash
 npx wrangler tail -f pretty
 ```
 
-## Environment Variables
+---
 
-Configured in `wrangler.toml` under `[vars]` (and optionally as secrets in the Cloudflare dashboard):
+## Environment variables
 
-| Variable | Description |
-|---|---|
-| `ORIGIN_HOSTNAME` | AEM Edge Delivery origin hostname |
-| `COMMERCE_GRAPHQL_ENDPOINT` | Adobe Commerce Catalog Services GraphQL endpoint |
-| `COMMERCE_API_KEY` | API key for Catalog Services |
-| `MAGENTO_CUSTOMER_GROUP` | Customer group hash |
-| `MAGENTO_ENVIRONMENT_ID` | Commerce environment ID |
-| `MAGENTO_STORE_CODE` | Store code |
-| `MAGENTO_STORE_VIEW_CODE` | Store view code |
-| `MAGENTO_WEBSITE_CODE` | Website code |
+Set in `wrangler.toml` under `[vars]`, or as secrets via the Cloudflare dashboard.
 
-Optional (read in `index.mjs` if set):
+| Variable | Required | Description |
+|---|---|---|
+| `ORIGIN_HOSTNAME` | Yes | AEM Edge Delivery origin hostname |
+| `COMMERCE_GRAPHQL_ENDPOINT` | Yes | Adobe Commerce Catalog Services GraphQL endpoint URL |
+| `COMMERCE_API_KEY` | Yes | API key for Catalog Services |
+| `MAGENTO_ENVIRONMENT_ID` | Yes | Commerce environment ID |
+| `MAGENTO_STORE_CODE` | Yes | Store code (e.g. `main_website_store`) |
+| `MAGENTO_STORE_VIEW_CODE` | Yes | Store view code (e.g. `default`) |
+| `MAGENTO_WEBSITE_CODE` | Yes | Website code (e.g. `base`) |
+| `MAGENTO_CUSTOMER_GROUP` | No | Customer group hash for personalised pricing |
+| `ORIGIN_AUTHENTICATION` | No | Sent as `Authorization: token …` to the AEM origin |
+| `PUSH_INVALIDATION` | No | Set to `disabled` to suppress `x-push-invalidation` headers |
 
-| Variable | Description |
-|---|---|
-| `ORIGIN_AUTHENTICATION` | Sent as `authorization: token …` to the origin |
-| `PUSH_INVALIDATION` | When not `disabled`, sets `x-push-invalidation: enabled` on the origin request |
+---
 
-## Custom Domain (optional)
+## Custom domain
 
-When you're ready to use a custom domain, add `route` and `account_id` to `wrangler.toml`:
+Add `route` and `account_id` to `wrangler.toml`:
 
 ```toml
 route = "www.yourdomain.com/*"
 account_id = "your-account-id"
 ```
 
-Then configure in the [Cloudflare Dashboard](https://dash.cloudflare.com/):
+Then in the [Cloudflare Dashboard](https://dash.cloudflare.com/):
 
-1. **DNS** -- Create a proxied `CNAME` record pointing to your AEM origin
-2. **SSL/TLS > Edge Certificates** -- Enable **Always Use HTTPS**
-3. **Caching > Configuration** -- Set Browser Cache TTL to **Respect Existing Headers**
-4. **Caching > Cache Rules** -- Create a rule matching your hostname, set to **Eligible for cache** with **Respect Origin TTL**
+1. **DNS** — Create a proxied `CNAME` pointing to your AEM origin
+2. **SSL/TLS › Edge Certificates** — Enable **Always Use HTTPS**
+3. **Caching › Configuration** — Set Browser Cache TTL to **Respect Existing Headers**
+4. **Caching › Cache Rules** — Match your hostname, set to **Eligible for cache** with **Respect Origin TTL**
+
+---
 
 ## References
 

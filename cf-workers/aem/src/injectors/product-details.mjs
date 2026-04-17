@@ -14,31 +14,20 @@
  * Product data is fetched from Adobe Commerce Catalog Services via GraphQL.
  */
 import { PRODUCT_FRAGMENT } from '@dropins/storefront-pdp/fragments.js';
-import { injectIntoBlock } from '../lib/template.mjs';
-import { injectInitialData } from '../lib/initial-data.mjs';
-import { injectJsonLd } from '../lib/jsonld.mjs';
-import { injectMetadataTags } from '../lib/metadata.mjs';
+import {
+  defineInjector, jsonLd, metadata, initialData, block,
+} from '../lib/injector.mjs';
+import { fetchCommerce, buildAvailability } from '../lib/commerce.mjs';
 import { formatPrice } from '../lib/html.mjs';
 
 // ---------------------------------------------------------------------------
-// Constants
+// GraphQL
 // ---------------------------------------------------------------------------
 
-/** Marker meta for PDP HTML (must match authoring / default-query head meta). */
-const PDP_TEMPLATE_META = '<meta name="template" content="pdp">';
-
-/** The AEM block class name to target for HTML injection. */
-const BLOCK_CLASS = 'product-details';
-
-/**
- * GraphQL query for Catalog Services — fetches only the fields required for
- * JSON-LD, meta tags, and block HTML. Whitespace is collapsed at runtime
- * to keep the GET request URL short.
- */
 const PRODUCT_QUERY = /* GraphQL */ `
   query GET_PRODUCT_PAGE_DATA($sku: String!) {
     products(skus: [$sku]) {
-     ...PRODUCT_FRAGMENT
+      ...PRODUCT_FRAGMENT
     }
     variants(sku: $sku) {
       variants {
@@ -55,7 +44,7 @@ const PRODUCT_QUERY = /* GraphQL */ `
     }
   }
   ${PRODUCT_FRAGMENT}
-`.replace(/\s+/g, ' ').trim();
+`;
 
 // ---------------------------------------------------------------------------
 // Data fetching
@@ -71,53 +60,18 @@ function extractSku(pathname) {
 }
 
 /**
- * Fetches product and variant data from Adobe Commerce Catalog Services.
- * Uses a GET request so responses can be cached by the CDN.
- *
- * @param {string} pathname - Request pathname (e.g. /products/adobe-hoodie/ADB127)
- * @param {object} env - Worker environment bindings
- * @returns {Promise<{product: object, variants: object[]}|null>}
+ * @param {{ pathname: string, env: object }} ctx
+ * @returns {Promise<{ product: object, variants: object[] }|null>}
  */
-async function fetchProductData(pathname, env) {
+async function fetchProductData({ pathname, env }) {
   const sku = extractSku(pathname);
-  if (!sku || !env.COMMERCE_GRAPHQL_ENDPOINT) {
-    return null;
-  }
+  if (!sku) return null;
 
-  const params = new URLSearchParams({
-    query: PRODUCT_QUERY,
-    variables: JSON.stringify({ sku }),
-  });
-
-  const url = `${env.COMMERCE_GRAPHQL_ENDPOINT}?${params}`;
-  const response = await fetch(url, {
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': env.COMMERCE_API_KEY,
-      'magento-customer-group': env.MAGENTO_CUSTOMER_GROUP,
-      'magento-environment-id': env.MAGENTO_ENVIRONMENT_ID,
-      'magento-store-code': env.MAGENTO_STORE_CODE,
-      'magento-store-view-code': env.MAGENTO_STORE_VIEW_CODE,
-      'magento-website-code': env.MAGENTO_WEBSITE_CODE,
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    console.error(`Commerce GraphQL error: ${response.status}`, body);
-    return null;
-  }
-
-  const { data, errors } = await response.json();
-  if (errors?.length) {
-    console.error('Commerce GraphQL errors:', JSON.stringify(errors));
-    return null;
-  }
+  const data = await fetchCommerce(PRODUCT_QUERY, { sku }, env);
+  if (!data) return null;
 
   const product = data?.products?.[0];
-  if (!product) {
-    return null;
-  }
+  if (!product) return null;
 
   return { product, variants: data?.variants?.variants || [] };
 }
@@ -125,10 +79,6 @@ async function fetchProductData(pathname, env) {
 // ---------------------------------------------------------------------------
 // JSON-LD
 // ---------------------------------------------------------------------------
-
-function buildAvailability(inStock) {
-  return inStock ? 'http://schema.org/InStock' : 'http://schema.org/OutOfStock';
-}
 
 function buildOffers({ product, variants }) {
   if (variants.length > 1) {
@@ -154,10 +104,6 @@ function buildOffers({ product, variants }) {
   }];
 }
 
-/**
- * Builds the schema.org Product JSON-LD object.
- * Passed to injectJsonLd() from the library.
- */
 function buildProductJsonLd(data) {
   const { product } = data;
   const {
@@ -167,7 +113,7 @@ function buildProductJsonLd(data) {
   const productUrl = `/products/${urlKey}/${sku}`;
 
   return {
-    '@context': 'http://schema.org',
+    '@context': 'https://schema.org',
     '@type': 'Product',
     name,
     description,
@@ -182,23 +128,19 @@ function buildProductJsonLd(data) {
 }
 
 // ---------------------------------------------------------------------------
-// Metadata tags
+// Metadata
 // ---------------------------------------------------------------------------
 
-/**
- * Builds the [attr, key, content] tuples for product meta tags.
- * Passed to injectMetadataTags() from the library.
- */
-function buildProductMetadata({ product }, pageUrl) {
+function buildProductMetadata({ product }) {
   const {
     name, metaTitle, metaDescription, metaKeyword, shortDescription, images,
   } = product;
   const amount = product.priceRange?.minimum?.final?.amount
     || product.price?.final?.amount;
-
   const thumbnail = images?.find((img) => img.roles?.includes('thumbnail'));
   const imageUrl = thumbnail?.url || images?.[0]?.url;
   const title = metaTitle || name;
+  const pageUrl = `/products/${product.urlKey}/${product.sku}`;
 
   return [
     ['name', 'title', title],
@@ -220,7 +162,7 @@ function buildProductMetadata({ product }, pageUrl) {
 // ---------------------------------------------------------------------------
 
 /**
- * Builds the product details block rows.
+ * Builds the product-details block rows.
  * Each entry is a [label, value] pair rendered as an AEM block row.
  *
  * Add, remove, or reorder rows here to change the server-rendered output.
@@ -230,69 +172,28 @@ function buildProductMetadata({ product }, pageUrl) {
 function buildProductBlockRows({ product }) {
   const amount = product.priceRange?.minimum?.final?.amount
     || product.price?.final?.amount;
-  const price = formatPrice(amount?.value, amount?.currency);
-
   const mainImage = product.images?.[0];
-  const imageHtml = mainImage
-    ? `<img src="${mainImage.url}" alt="${product.name}" loading="eager" width="500" height="500">`
-    : '';
 
   return [
-    ['Image', imageHtml],
+    ['Image', mainImage ? `<img src="${mainImage.url}" alt="${product.name}">` : ''],
     ['Name', product.name],
-    ['SKU', product.sku],
-    ['Price', price],
-    ['Short Description', product.shortDescription],
+    ['Price', formatPrice(amount?.value, amount?.currency)],
+    ['Description', product.description || product.shortDescription],
     ['Availability', product.inStock ? 'In stock' : 'Out of stock'],
-    ['Description', product.description],
   ];
 }
 
 // ---------------------------------------------------------------------------
-// Injector entry point
+// Injector
 // ---------------------------------------------------------------------------
 
-/**
- * Enhances product page HTML with server-side content:
- *   - JSON-LD structured data
- *   - Meta tags (SEO, Open Graph, product pricing)
- *   - Page title
- *   - Product HTML in the product-details block
- *   - window.__INITIAL_DATA__[`PDP:${sku}`] with GraphQL payload (script + nonce)
- *
- * Non-HTML and non-product responses pass through unchanged.
- *
- * @param {Response} response - The origin response
- * @param {string} pathname - The request pathname
- * @param {object} env - Worker environment bindings
- * @returns {Promise<Response>}
- */
-export async function injectProductDetails(response, pathname, env) {
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('text/html')) {
-    return response;
-  }
-
-  let html = await response.text();
-  if (!html.includes(PDP_TEMPLATE_META)) {
-    return new Response(html, response);
-  }
-
-  const data = await fetchProductData(pathname, env);
-  if (!data) {
-    return new Response(html, response);
-  }
-
-  const { product } = data;
-  const pageUrl = `/products/${product.urlKey}/${product.sku}`;
-
-  // Head: JSON-LD + meta tags (including <title> override)
-  html = injectJsonLd(html, buildProductJsonLd(data));
-  html = injectMetadataTags(html, buildProductMetadata(data, pageUrl));
-  html = injectInitialData(html, `PDP:${product.sku}`, data);
-
-  // Body: product block HTML (replace existing content)
-  html = injectIntoBlock(html, BLOCK_CLASS, buildProductBlockRows(data), { strategy: 'replace' });
-
-  return new Response(html, response);
-}
+export default defineInjector({
+  match: { template: 'pdp' },
+  fetch: fetchProductData,
+  inject: [
+    jsonLd((data) => buildProductJsonLd(data)),
+    metadata((data) => buildProductMetadata(data)),
+    initialData((data) => [`PDP:${data.product.sku}`, data]),
+    block('product-details', (data) => buildProductBlockRows(data), { strategy: 'replace' }),
+  ],
+});
