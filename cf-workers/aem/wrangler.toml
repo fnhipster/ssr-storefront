@@ -4,4 +4,11 @@ workers_dev = true
 compatibility_date = "2025-03-17"
 
 [vars]
-ORIGIN_HOSTNAME = "main--ssr-storefront--fnhipster.aem.live"
+ORIGIN_HOSTNAME = "ssr--ssr-storefront--fnhipster.aem.live"
+COMMERCE_GRAPHQL_ENDPOINT = "https://www.aemshop.net/cs-graphql"
+COMMERCE_API_KEY = "4dfa19c9fe6f4cccade55cc5b3da94f7"
+MAGENTO_CUSTOMER_GROUP = "b6589fc6ab0dc82cf12099d1c2d40ab994e8410c"
+MAGENTO_ENVIRONMENT_ID = "f38a0de0-764b-41fa-bd2c-5bc2f3c7b39a"
+MAGENTO_STORE_CODE = "main_website_store"
+MAGENTO_STORE_VIEW_CODE = "default"
+MAGENTO_WEBSITE_CODE = "base"

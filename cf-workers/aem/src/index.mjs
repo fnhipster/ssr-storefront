@@ -12,6 +12,8 @@
 
 'use strict';
 
+import { enhanceProductPage } from './product-page.mjs';
+
 const getExtension = (path) => {
   const basename = path.split('/').pop();
   const pos = basename.lastIndexOf('.');
@@ -75,9 +77,9 @@ const handleRequest = async (request, env, ctx) => {
   url.hostname = env.ORIGIN_HOSTNAME;
   url.protocol = 'https:';
   url.port = '';
-  if (!url.origin.match(/^https:\/\/main--.*--.*\.(?:aem|hlx)\.live/)) {
-    return new Response('Invalid ORIGIN_HOSTNAME', { status: 500 });
-  }
+  // if (!url.origin.match(/^https:\/\/main--.*--.*\.(?:aem|hlx)\.live/)) {
+  //   return new Response('Invalid ORIGIN_HOSTNAME', { status: 500 });
+  // }
   const req = new Request(url, request);
   req.headers.set('x-forwarded-host', req.headers.get('host'));
   req.headers.set('x-byo-cdn-type', 'cloudflare');
@@ -107,6 +109,7 @@ const handleRequest = async (request, env, ctx) => {
   }
   resp.headers.delete('age');
   resp.headers.delete('x-robots-tag');
+  resp = await enhanceProductPage(resp, url.pathname, env);
   return resp;
 };
 
