@@ -1,0 +1,7 @@
+name = "aem-prod-worker"
+main = "src/index.mjs"
+workers_dev = true
+compatibility_date = "2025-03-17"
+
+[vars]
+ORIGIN_HOSTNAME = "main--ssr-storefront--fnhipster.aem.live"

@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "name": "aem-prod-worker",
+  "version": "1.0.0",
+  "description": "AEM Production Cloudflare Worker for ssr-storefront",
+  "module": "./src/index.mjs",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "log": "wrangler tail -f pretty"
+  },
+  "license": "Apache-2.0"
+}
