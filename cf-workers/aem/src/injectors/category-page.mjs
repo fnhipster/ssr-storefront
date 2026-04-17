@@ -9,6 +9,7 @@
  * `urlpath` for the category filter is read from the AEM block (label `urlpath`)
  * before the block body is replaced.
  */
+import { ProductView } from '@dropins/storefront-product-discovery/fragments.js';
 import {
   escapeHtml,
   findBlockInnerBoundaries,
@@ -50,43 +51,11 @@ const CATEGORY_PRODUCT_SEARCH = /* GraphQL */ `
     ) {
       total_count
       items {
-        productView {
-          __typename
-          sku
-          name
-          inStock
-          url
-          urlKey
-          images {
-            url
-            roles
-          }
-          ... on SimpleProductView {
-            price {
-              final {
-                amount {
-                  value
-                  currency
-                }
-              }
-            }
-          }
-          ... on ComplexProductView {
-            priceRange {
-              minimum {
-                final {
-                  amount {
-                    value
-                    currency
-                  }
-                }
-              }
-            }
-          }
-        }
+        ...ProductView
       }
     }
   }
+  ${ProductView}
 `.replace(/\s+/g, ' ').trim();
 
 const JSON_LD_LIST_FRAGMENT = '#list';
