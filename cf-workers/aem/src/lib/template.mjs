@@ -68,6 +68,80 @@ export function renderBlock(rows) {
 }
 
 /**
+ * Index of the `>` that closes the tag starting at `openLt` (must point at `<`).
+ * Quote-aware so `>` inside attribute values does not end the tag early.
+ *
+ * @param {string} html
+ * @param {number} openLt
+ * @returns {number} index of closing `>`, or -1
+ */
+function endOfOpeningTag(html, openLt) {
+  let quote = null;
+  for (let i = openLt + 1; i < html.length; i += 1) {
+    const c = html[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === '>') return i;
+  }
+  return -1;
+}
+
+/**
+ * Finds the inner HTML range of the outermost `<div class="…blockClass…">` wrapper
+ * by balancing `<div` opens against `</div>` closes. A plain `*?</div>` regex is wrong
+ * because block rows are nested `<div>`s and the first `</div>` is not the wrapper end.
+ *
+ * @param {string} html
+ * @param {string} blockClass
+ * @returns {{ openTagEnd: number, closeTagStart: number } | null}
+ */
+function findBlockInnerBoundaries(html, blockClass) {
+  const escaped = blockClass.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const openRe = new RegExp(
+    `<div\\s[^>]*class="[^"]*${escaped}[^"]*"[^>]*>`,
+    'i',
+  );
+  const openMatch = openRe.exec(html);
+  if (!openMatch) return null;
+
+  const openTagStart = openMatch.index;
+  const gt = endOfOpeningTag(html, openTagStart);
+  if (gt < 0) return null;
+
+  const innerStart = gt + 1;
+  let depth = 1;
+  let i = innerStart;
+
+  while (i < html.length && depth > 0) {
+    const rest = html.slice(i);
+    if (/^<\/div>/i.test(rest)) {
+      depth -= 1;
+      if (depth === 0) {
+        return { openTagEnd: innerStart, closeTagStart: i };
+      }
+      i += 6;
+      continue;
+    }
+    if (/^<div\b/i.test(rest)) {
+      const end = endOfOpeningTag(html, i);
+      if (end < 0) return null;
+      depth += 1;
+      i = end + 1;
+      continue;
+    }
+    i += 1;
+  }
+
+  return null;
+}
+
+/**
  * Injects rendered block rows into an AEM block identified by its class name.
  *
  * @param {string} html - The full page HTML
@@ -83,16 +157,17 @@ export function injectIntoBlock(html, blockClass, rows, { strategy = 'replace' }
   const content = renderBlock(rows);
   if (!content) return html;
 
-  const escaped = blockClass.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(
-    `(<div\\s[^>]*class="[^"]*${escaped}[^"]*"[^>]*>)([\\s\\S]*?)(</div>)`,
-    'i',
-  );
-  const match = html.match(pattern);
-  if (!match) return html;
+  const bounds = findBlockInnerBoundaries(html, blockClass);
+  if (!bounds) return html;
+
+  const { openTagEnd, closeTagStart } = bounds;
+  const head = html.slice(0, openTagEnd);
+  const tail = html.slice(closeTagStart);
 
   if (strategy === 'append') {
-    return html.replace(pattern, `$1$2\n${content}\n$3`);
+    const inner = html.slice(openTagEnd, closeTagStart);
+    return `${head}${inner}\n${content}\n${tail}`;
   }
-  return html.replace(pattern, `$1\n${content}\n$3`);
+
+  return `${head}\n${content}\n${tail}`;
 }

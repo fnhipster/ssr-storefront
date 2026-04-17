@@ -90,10 +90,8 @@ await initializeDropin(async () => {
 
   const ssrData = window.__INITIAL_DATA__?.[`PDP:${sku}`];
 
-  console.log('🟢', ssrData);
-
   const [product, labels] = await Promise.all([
-    fetchProductData(sku, { optionsUIDs, skipTransform: true }).then(preloadImageMiddleware),
+    (ssrData ? Promise.resolve(ssrData) : fetchProductData(sku, { optionsUIDs, skipTransform: true })).then(preloadImageMiddleware),
     fetchPlaceholders('placeholders/pdp.json'),
   ]);
 

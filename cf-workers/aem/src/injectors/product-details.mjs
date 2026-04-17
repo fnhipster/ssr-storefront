@@ -6,6 +6,7 @@
  *   - SEO & Open Graph meta tags
  *   - Page title
  *   - Server-rendered product HTML into the product-details block
+ *   - window.__INITIAL_DATA__[PDP:{sku}] via inline script (CSP nonce from HTML)
  *
  * Product pages are identified by the presence of:
  *   <meta property="og:type" content="product">
@@ -14,6 +15,7 @@
  */
 import { PRODUCT_FRAGMENT } from '@dropins/storefront-pdp/fragments.js';
 import { injectIntoBlock } from '../lib/template.mjs';
+import { injectInitialData } from '../lib/initial-data.mjs';
 import { injectJsonLd } from '../lib/jsonld.mjs';
 import { injectMetadataTags } from '../lib/metadata.mjs';
 import { formatPrice } from '../lib/html.mjs';
@@ -255,6 +257,7 @@ function buildProductBlockRows({ product }) {
  *   - Meta tags (SEO, Open Graph, product pricing)
  *   - Page title
  *   - Product HTML in the product-details block
+ *   - window.__INITIAL_DATA__[`PDP:${sku}`] with GraphQL payload (script + nonce)
  *
  * Non-HTML and non-product responses pass through unchanged.
  *
@@ -285,6 +288,7 @@ export async function injectProductDetails(response, pathname, env) {
   // Head: JSON-LD + meta tags (including <title> override)
   html = injectJsonLd(html, buildProductJsonLd(data));
   html = injectMetadataTags(html, buildProductMetadata(data, pageUrl));
+  html = injectInitialData(html, `PDP:${product.sku}`, data);
 
   // Body: product block HTML (replace existing content)
   html = injectIntoBlock(html, BLOCK_CLASS, buildProductBlockRows(data), { strategy: 'replace' });
