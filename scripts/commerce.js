@@ -29,11 +29,11 @@ import initializeDropins from './initializers/index.js';
  */
 function sanitizeName(name) {
   return name
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
+    // .toLowerCase()
+    // .normalize('NFD')
+    // .replace(/[\u0300-\u036f]/g, '')
+    // .replace(/[^a-z0-9]+/g, '-')
+    // .replace(/^-|-$/g, '');
 }
 
 /**
