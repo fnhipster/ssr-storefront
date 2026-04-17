@@ -34,5 +34,12 @@ module.exports = {
         'import/no-extraneous-dependencies': 'off',
       },
     },
+    {
+      files: ['cf-workers/**/*.mjs'],
+      env: { browser: false },
+      rules: {
+        'import/extensions': ['error', { mjs: 'always' }],
+      },
+    },
   ],
 };

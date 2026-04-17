@@ -12,7 +12,7 @@
 
 'use strict';
 
-import { enhanceProductPage } from './product-page.mjs';
+import { injectProductDetails } from './injectors/product-details.mjs';
 
 const getExtension = (path) => {
   const basename = path.split('/').pop();
@@ -109,7 +109,7 @@ const handleRequest = async (request, env, ctx) => {
   }
   resp.headers.delete('age');
   resp.headers.delete('x-robots-tag');
-  resp = await enhanceProductPage(resp, url.pathname, env);
+  resp = await injectProductDetails(resp, url.pathname, env);
   return resp;
 };
 
