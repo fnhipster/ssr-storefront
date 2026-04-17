@@ -10,8 +10,6 @@
  * governing permissions and limitations under the License.
  */
 
-'use strict';
-
 import pdpInjector from './injectors/product-details.mjs';
 import plpInjector from './injectors/category-page.mjs';
 
@@ -26,7 +24,7 @@ const getExtension = (path) => {
 const isMediaRequest = (url) => /\/media_[0-9a-f]{40,}[/a-zA-Z0-9_-]*\.[0-9a-z]+$/.test(url.pathname);
 const isRUMRequest = (url) => /\/\.(rum|optel)\/.*/.test(url.pathname);
 
-const handleRequest = async (request, env, ctx) => {
+const handleRequest = async (request, env, _ctx) => {
   const url = new URL(request.url);
   if (url.port && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
     // Cloudflare opens a couple more ports than 443, so we redirect visitors
@@ -34,11 +32,11 @@ const handleRequest = async (request, env, ctx) => {
     // https://developers.cloudflare.com/fundamentals/reference/network-ports/#network-ports-compatible-with-cloudflares-proxy
     const redirectTo = new URL(request.url);
     redirectTo.port = '';
-    return new Response('Moved permanently to ' + redirectTo.href, {
+    return new Response(`Moved permanently to ${redirectTo.href}`, {
       status: 301,
       headers: {
-        location: redirectTo.href
-      }
+        location: redirectTo.href,
+      },
     });
   }
 
@@ -46,8 +44,8 @@ const handleRequest = async (request, env, ctx) => {
     return new Response('Not Found', { status: 404 });
   }
 
-  if(isRUMRequest(url)) {
-    if(!['GET', 'POST', 'OPTIONS'].includes(request.method)) {
+  if (isRUMRequest(url)) {
+    if (!['GET', 'POST', 'OPTIONS'].includes(request.method)) {
       return new Response('Method Not Allowed', { status: 405 });
     }
   }
@@ -60,17 +58,17 @@ const handleRequest = async (request, env, ctx) => {
   // sanitize search params
   const { searchParams } = url;
   if (isMediaRequest(url)) {
-    for (const [key] of searchParams.entries()) {
+    [...searchParams.keys()].forEach((key) => {
       if (!['format', 'height', 'optimize', 'width'].includes(key)) {
         searchParams.delete(key);
       }
-    }
+    });
   } else if (extension === 'json') {
-    for (const [key] of searchParams.entries()) {
+    [...searchParams.keys()].forEach((key) => {
       if (!['limit', 'offset', 'sheet'].includes(key)) {
         searchParams.delete(key);
       }
-    }
+    });
   } else {
     // neither media nor json request: strip search params
     url.search = '';
@@ -113,10 +111,10 @@ const handleRequest = async (request, env, ctx) => {
   resp.headers.delete('age');
   resp.headers.delete('x-robots-tag');
   const injectorCtx = { pathname: url.pathname, env, origin: url.origin };
-  for (const injector of INJECTORS) {
-    // eslint-disable-next-line no-await-in-loop
-    resp = await injector(resp, injectorCtx);
-  }
+  resp = await INJECTORS.reduce(
+    async (prev, injector) => injector(await prev, injectorCtx),
+    Promise.resolve(resp),
+  );
   return resp;
 };
 

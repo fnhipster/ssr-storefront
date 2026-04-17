@@ -10,13 +10,13 @@
  * The `urlpath` for the category filter is read from the AEM block (label
  * `urlpath`) before the block body is replaced.
  */
-import { ProductView } from '@dropins/storefront-product-discovery/fragments.js';
+import { ProductView } from '@dropins/storefront-product-discovery/fragments';
 import {
   defineInjector, jsonLd, metadata, block,
 } from '../lib/injector.mjs';
 import { fetchCommerce, buildAvailability, formatOfferPrice } from '../lib/commerce.mjs';
 import { extractBlockRowValue } from '../lib/template.mjs';
-import { buildCardHtml, buildCardListRows } from '../lib/block-list.mjs';
+import { buildCardListRows } from '../lib/block-list.mjs';
 import { absoluteUrl, titleCaseSegment } from '../lib/url.mjs';
 import { formatPrice } from '../lib/html.mjs';
 
@@ -102,7 +102,9 @@ function mapProductViewForLd(pv, origin) {
  * @param {{ html: string, pathname: string, env: object, origin: string }} ctx
  * @returns {Promise<CategoryPagePayload>}
  */
-async function fetchCategoryPageData({ html, pathname, env, origin }) {
+async function fetchCategoryPageData({
+  html, pathname, env, origin,
+}) {
   const urlpath = extractBlockRowValue(html, BLOCK_CLASS, 'urlpath');
   const categoryPath = urlpath || pathname.replace(/^\//, '') || '';
 
@@ -176,7 +178,9 @@ function buildCategoryJsonLdGraph(data, { origin, pathname }) {
   });
 
   const pathParts = path.split('/').filter(Boolean);
-  const breadcrumbItems = [{ '@type': 'ListItem', position: 1, name: 'Home', item: `${base}/` }];
+  const breadcrumbItems = [{
+    '@type': 'ListItem', position: 1, name: 'Home', item: `${base}/`,
+  }];
   let acc = '';
   pathParts.forEach((part) => {
     acc += `/${part}`;

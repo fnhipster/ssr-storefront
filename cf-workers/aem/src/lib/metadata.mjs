@@ -82,7 +82,7 @@ export function injectMetadataTags(html, tags) {
     ([, , content]) => content != null && content !== '' && content !== false,
   );
 
-  for (const [attr, key, content] of validTags) {
+  validTags.forEach(([attr, key, content]) => {
     // Remove existing meta tag with the same attr+key
     result = removeExistingMetaTag(result, attr, key);
 
@@ -90,7 +90,7 @@ export function injectMetadataTags(html, tags) {
     if (attr === 'name' && key === 'title') {
       titleValue = content;
     }
-  }
+  });
 
   // Replace <title> tag if a title meta tag was provided
   if (titleValue) {

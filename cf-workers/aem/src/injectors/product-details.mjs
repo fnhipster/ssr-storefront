@@ -13,7 +13,7 @@
  *
  * Product data is fetched from Adobe Commerce Catalog Services via GraphQL.
  */
-import { PRODUCT_FRAGMENT } from '@dropins/storefront-pdp/fragments.js';
+import { PRODUCT_FRAGMENT } from '@dropins/storefront-pdp/fragments';
 import {
   defineInjector, jsonLd, metadata, initialData, block,
 } from '../lib/injector.mjs';

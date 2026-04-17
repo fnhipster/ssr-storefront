@@ -66,7 +66,8 @@ function removeJsonLdScriptsContaining(html, needle) {
  *
  * Dedup strategies:
  * - Default: if `data['@type']` is set, removes an existing JSON-LD block matching that @type.
- * - `{ dedupeContains }`: removes any JSON-LD block whose raw body includes that string (for @graph documents without a root @type).
+ * - `{ dedupeContains }`: removes any JSON-LD block whose raw body includes that
+ *   string (for @graph documents without a root @type).
  *
  * @param {string} html - The full page HTML
  * @param {object} data - The JSON-LD object

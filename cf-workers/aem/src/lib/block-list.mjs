@@ -43,7 +43,9 @@ import { escapeHtml } from './template.mjs';
  * }} item
  * @returns {string} HTML string
  */
-export function buildCardHtml({ name, url, image, price }) {
+export function buildCardHtml({
+  name, url, image, price,
+}) {
   const nameEsc = escapeHtml(name);
   const hrefEsc = escapeHtml(url);
   const imageHtml = image ? `<img src="${escapeHtml(image)}" alt="${nameEsc}">` : '';

@@ -77,8 +77,9 @@ export const jsonLd = (buildFn, optsFn) => (html, data, ctx) => {
  *   Returns an array of `[attr, key, content]` tuples.
  * @returns {function(html: string, data: object, ctx: InjectorContext): string}
  */
-export const metadata = (buildFn) => (html, data, ctx) =>
-  injectMetadataTags(html, buildFn(data, ctx));
+export const metadata = (buildFn) => (html, data, ctx) => (
+  injectMetadataTags(html, buildFn(data, ctx))
+);
 
 /**
  * Injects `window.__INITIAL_DATA__[key] = value` before `</head>`,
@@ -102,8 +103,9 @@ export const initialData = (buildFn) => (html, data, ctx) => {
  * @param {{ strategy?: 'replace' | 'append' }} [opts]
  * @returns {function(html: string, data: object, ctx: InjectorContext): string}
  */
-export const block = (blockClass, buildFn, opts) => (html, data, ctx) =>
-  injectIntoBlock(html, blockClass, buildFn(data, ctx), opts);
+export const block = (blockClass, buildFn, opts) => (html, data, ctx) => (
+  injectIntoBlock(html, blockClass, buildFn(data, ctx), opts)
+);
 
 // ---------------------------------------------------------------------------
 // Injector factory
@@ -128,7 +130,9 @@ export const block = (blockClass, buildFn, opts) => (html, data, ctx) =>
  * @param {{
  *   match?: { template?: string },
  *   fetch?: (ctx: InjectorContext & { html: string }) => Promise<object|null>,
- *   inject: Array<function(html: string, data: object|null, ctx: InjectorContext): string|Promise<string>>,
+ *   inject: Array<
+ *     function(html: string, data: object|null, ctx: InjectorContext): string|Promise<string>
+ *   >,
  * }} config
  *
  * @returns {function(response: Response, ctx: InjectorContext): Promise<Response>}
@@ -161,10 +165,10 @@ export function defineInjector({ match, fetch: fetchFn, inject }) {
     }
 
     // 5. Transform pipeline
-    for (const transform of inject) {
-      // eslint-disable-next-line no-await-in-loop
-      html = await transform(html, data, ctx);
-    }
+    html = await inject.reduce(
+      async (prevHtml, transform) => transform(await prevHtml, data, ctx),
+      Promise.resolve(html),
+    );
 
     return new Response(html, response);
   };

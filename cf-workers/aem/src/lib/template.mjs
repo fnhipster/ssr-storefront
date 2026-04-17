@@ -81,13 +81,11 @@ function endOfOpeningTag(html, openLt) {
     const c = html[i];
     if (quote) {
       if (c === quote) quote = null;
-      continue;
-    }
-    if (c === '"' || c === "'") {
+    } else if (c === '"' || c === "'") {
       quote = c;
-      continue;
+    } else if (c === '>') {
+      return i;
     }
-    if (c === '>') return i;
   }
   return -1;
 }
@@ -126,16 +124,14 @@ export function findBlockInnerBoundaries(html, blockClass) {
         return { openTagEnd: innerStart, closeTagStart: i };
       }
       i += 6;
-      continue;
-    }
-    if (/^<div\b/i.test(rest)) {
+    } else if (/^<div\b/i.test(rest)) {
       const end = endOfOpeningTag(html, i);
       if (end < 0) return null;
       depth += 1;
       i = end + 1;
-      continue;
+    } else {
+      i += 1;
     }
-    i += 1;
   }
 
   return null;
