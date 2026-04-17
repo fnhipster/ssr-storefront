@@ -1,17 +1,15 @@
 /**
  * JSON-LD Library
  *
- * Renders structured data (JSON-LD) into a <script> tag for injection
- * into HTML <head>. Works like renderBlock but for schema.org data.
- * Handles deduplication — if an existing JSON-LD script tag is found
- * with the same @type, it is replaced.
+ * Renders structured data (JSON-LD) into a <script> tag and injects it into
+ * <head>, replacing any existing block of the same type.
  *
  * Usage:
  *
  *   import { injectJsonLd } from '../lib/jsonld.mjs';
  *
  *   html = injectJsonLd(html, {
- *     '@context': 'http://schema.org',
+ *     '@context': 'https://schema.org',
  *     '@type': 'Product',
  *     name: 'Adobe Hoodie',
  *   });
@@ -32,29 +30,13 @@ export function renderJsonLd(data) {
 }
 
 /**
- * Removes an existing JSON-LD script tag from HTML that matches the given @type.
- *
- * @param {string} html
- * @param {string} type - The @type value to match (e.g. 'Product')
- * @returns {string}
- */
-function removeExistingJsonLd(html, type) {
-  const pattern = new RegExp(
-    `\\s*<script\\s+type="application/ld\\+json">[^<]*"@type"\\s*:\\s*"${type}"[^<]*</script>`,
-    'gi',
-  );
-  return html.replace(pattern, '');
-}
-
-/**
- * Removes JSON-LD script blocks whose body contains a given substring (e.g. @graph list @id).
+ * Removes any existing JSON-LD script block whose body contains the given string.
  *
  * @param {string} html
  * @param {string} needle
  * @returns {string}
  */
-function removeJsonLdScriptsContaining(html, needle) {
-  if (!needle) return html;
+function removeJsonLdContaining(html, needle) {
   return html.replace(
     /<script\s+type="application\/ld\+json">\s*([\s\S]*?)\s*<\/script>/gi,
     (full, body) => (body.includes(needle) ? '' : full),
@@ -62,26 +44,18 @@ function removeJsonLdScriptsContaining(html, needle) {
 }
 
 /**
- * Injects a JSON-LD script tag into an HTML string before </head>.
+ * Injects a JSON-LD script tag into an HTML string before </head>,
+ * replacing any existing block of the same type.
  *
- * Dedup strategies:
- * - Default: if `data['@type']` is set, removes an existing JSON-LD block matching that @type.
- * - `{ dedupeContains }`: removes any JSON-LD block whose raw body includes that
- *   string (for @graph documents without a root @type).
+ * - `@type` documents: removes any existing JSON-LD block containing that type string.
+ * - `@graph` documents: removes any existing JSON-LD block containing `"@graph"`.
  *
  * @param {string} html - The full page HTML
  * @param {object} data - The JSON-LD object
- * @param {{ dedupeContains?: string }} [options]
  * @returns {string} Modified HTML
  */
-export function injectJsonLd(html, data, { dedupeContains } = {}) {
-  let result = html;
-
-  if (dedupeContains) {
-    result = removeJsonLdScriptsContaining(result, dedupeContains);
-  } else if (data['@type']) {
-    result = removeExistingJsonLd(result, data['@type']);
-  }
-
+export function injectJsonLd(html, data) {
+  const needle = data['@graph'] ? '"@graph"' : (data['@type'] ? `"@type": "${data['@type']}"` : null);
+  const result = needle ? removeJsonLdContaining(html, needle) : html;
   return result.replace('</head>', `${renderJsonLd(data)}\n</head>`);
 }

@@ -25,7 +25,7 @@ import { formatPrice } from '../lib/html.mjs';
 // ---------------------------------------------------------------------------
 
 const BLOCK_CLASS = 'product-list-page';
-const JSON_LD_LIST_FRAGMENT = '#list';
+const JSON_LD_LIST_FRAGMENT = '#list'; // used as the @id suffix for the ItemList node
 
 const VISIBILITY_FILTER = {
   attribute: 'visibility',
@@ -80,7 +80,7 @@ function mapProductViewForLd(pv, origin) {
 
   return {
     name: pv.name,
-    url: productUrl,
+    url: `/products/${pv.urlKey}/${pv.sku}`,
     image: imageRaw ? absoluteUrl(origin, imageRaw) : '',
     price: formatOfferPrice(amount?.value),
     priceCurrency: amount?.currency || 'USD',
@@ -260,10 +260,7 @@ export default defineInjector({
   match: { template: 'plp' },
   fetch: fetchCategoryPageData,
   inject: [
-    jsonLd(
-      (data, ctx) => buildCategoryJsonLdGraph(data, ctx),
-      (schema) => ({ dedupeContains: schema['@graph']?.[0]?.['@id'] || JSON_LD_LIST_FRAGMENT }),
-    ),
+    jsonLd((data, ctx) => buildCategoryJsonLdGraph(data, ctx)),
     metadata((data, ctx) => buildCategoryMetadata(data, ctx)),
     block(BLOCK_CLASS, (data) => buildCategoryBlockRows(data), { strategy: 'replace' }),
   ],

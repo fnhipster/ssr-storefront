@@ -54,21 +54,13 @@ import { injectIntoBlock } from './template.mjs';
 // ---------------------------------------------------------------------------
 
 /**
- * Injects a JSON-LD script into `<head>`.
+ * Injects a JSON-LD script into `<head>`, replacing any existing block of the
+ * same type. Handles both `@type` and `@graph` documents automatically.
  *
  * @param {function(data: object, ctx: InjectorContext): object} buildFn
- *   Builds the JSON-LD object from data and context.
- * @param {function(schema: object, data: object, ctx: InjectorContext): object} [optsFn]
- *   Optional. Called with the already-built schema — returns options for
- *   `injectJsonLd` (e.g. `{ dedupeContains: '...' }`). Useful when the
- *   deduplication key is derived from the schema itself (e.g. @graph @id).
  * @returns {function(html: string, data: object, ctx: InjectorContext): string}
  */
-export const jsonLd = (buildFn, optsFn) => (html, data, ctx) => {
-  const schema = buildFn(data, ctx);
-  const opts = optsFn ? optsFn(schema, data, ctx) : undefined;
-  return injectJsonLd(html, schema, opts);
-};
+export const jsonLd = (buildFn) => (html, data, ctx) => injectJsonLd(html, buildFn(data, ctx));
 
 /**
  * Injects `<meta>` tags into `<head>`, deduplicating existing tags.

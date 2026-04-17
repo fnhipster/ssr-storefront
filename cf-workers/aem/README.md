@@ -120,26 +120,24 @@ Every `fetch` and transform function receives a context object:
 
 All imported from `lib/injector.mjs`. Each returns a `(html, data, ctx) => string` function and is listed in the `inject` array.
 
-### `jsonLd(buildFn, optsFn?)`
+### `jsonLd(buildFn)`
 
-Injects a `<script type="application/ld+json">` before `</head>`. Deduplicates against any existing block with the same `@type`.
+Injects a `<script type="application/ld+json">` before `</head>`, replacing any existing JSON-LD block of the same type. Deduplication is automatic — no options needed:
+
+- `@type` document → removes any existing block containing that type string
+- `@graph` document → removes any existing `@graph` block
 
 ```js
+// Regular @type document
 jsonLd((data) => ({
   '@context': 'https://schema.org',
   '@type': 'WebPage',
   name: data.title,
   url: data.url,
 }))
-```
 
-For `@graph` documents, the deduplication key must be derived from the built schema. Pass an optional second function:
-
-```js
-jsonLd(
-  (data, ctx) => buildCategoryJsonLdGraph(data, ctx),
-  (schema)    => ({ dedupeContains: schema['@graph']?.[0]?.['@id'] }),
-)
+// @graph document — dedup is still automatic
+jsonLd((data, ctx) => buildCategoryJsonLdGraph(data, ctx))
 ```
 
 ### `metadata(buildFn)`
@@ -168,6 +166,27 @@ block('my-block', (data) => [
   ['Description', data.description],
   ['Image',       `<img src="${data.imageUrl}" alt="${data.name}">`],
 ], { strategy: 'replace' })  // 'replace' (default) or 'append'
+```
+
+For a list of items, build a `<ul>` in the value cell. Use `buildCardListRows` from `lib/block-list.mjs` for the common card pattern, or build the HTML directly:
+
+```js
+block('my-block', (data) => [
+  ['Products', `<ul>
+    ${data.items.map((item) => `<li>
+      <a href="${item.url}"><img src="${item.image}" alt="${item.name}"> ${item.name}</a>
+      <span>${item.price}</span>
+    </li>`).join('\n')}
+  </ul>`],
+])
+```
+
+Or with `buildCardListRows`:
+
+```js
+import { buildCardListRows } from '../lib/block-list.mjs';
+
+block('my-block', (data) => buildCardListRows(null, data.items))
 ```
 
 ### `initialData(buildFn)`
@@ -258,9 +277,7 @@ Lower-level AEM block utilities. The `block` transform helper calls these intern
 
 ### `lib/jsonld.mjs`
 
-**`injectJsonLd(html, data, opts?)`** — Injects a `<script type="application/ld+json">` before `</head>`.
-- Default dedup: removes any existing JSON-LD block whose JSON contains the same `"@type"`.
-- `{ dedupeContains: string }` — removes any JSON-LD block whose raw body includes the given string. Use for `@graph` documents that have no root `@type`.
+**`injectJsonLd(html, data)`** — Injects a `<script type="application/ld+json">` before `</head>`, replacing any existing block of the same type. Handles `@type` and `@graph` documents automatically — no options required.
 
 **`renderJsonLd(data)`** — Returns only the `<script>` tag string (useful for testing).
 
