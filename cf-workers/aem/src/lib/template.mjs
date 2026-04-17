@@ -101,7 +101,7 @@ function endOfOpeningTag(html, openLt) {
  * @param {string} blockClass
  * @returns {{ openTagEnd: number, closeTagStart: number } | null}
  */
-function findBlockInnerBoundaries(html, blockClass) {
+export function findBlockInnerBoundaries(html, blockClass) {
   const escaped = blockClass.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const openRe = new RegExp(
     `<div\\s[^>]*class="[^"]*${escaped}[^"]*"[^>]*>`,
