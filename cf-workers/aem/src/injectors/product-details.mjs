@@ -12,7 +12,7 @@
  *
  * Product data is fetched from Adobe Commerce Catalog Services via GraphQL.
  */
-
+import { PRODUCT_FRAGMENT } from '@dropins/storefront-pdp/fragments.js';
 import { injectIntoBlock } from '../lib/template.mjs';
 import { injectJsonLd } from '../lib/jsonld.mjs';
 import { injectMetadataTags } from '../lib/metadata.mjs';
@@ -36,24 +36,7 @@ const BLOCK_CLASS = 'product-details';
 const PRODUCT_QUERY = /* GraphQL */ `
   query GET_PRODUCT_PAGE_DATA($sku: String!) {
     products(skus: [$sku]) {
-      __typename
-      sku
-      name
-      description
-      shortDescription
-      metaTitle
-      metaDescription
-      metaKeyword
-      inStock
-      urlKey
-      images(roles: []) { url roles }
-      attributes(roles: ["brand"]) { name value }
-      ... on SimpleProductView {
-        price { final { amount { value currency } } }
-      }
-      ... on ComplexProductView {
-        priceRange { minimum { final { amount { value currency } } } }
-      }
+     ...PRODUCT_FRAGMENT
     }
     variants(sku: $sku) {
       variants {
@@ -69,6 +52,7 @@ const PRODUCT_QUERY = /* GraphQL */ `
       }
     }
   }
+  ${PRODUCT_FRAGMENT}
 `.replace(/\s+/g, ' ').trim();
 
 // ---------------------------------------------------------------------------

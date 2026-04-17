@@ -9,5 +9,9 @@
     "dev": "wrangler dev",
     "log": "wrangler tail -f pretty"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@dropins/storefront-pdp": "^3.0.2",
+    "@dropins/tools": "^1.8.0"
+  }
 }
