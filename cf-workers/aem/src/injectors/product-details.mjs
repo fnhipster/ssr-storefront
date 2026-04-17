@@ -9,7 +9,7 @@
  *   - window.__INITIAL_DATA__[PDP:{sku}] via inline script (CSP nonce from HTML)
  *
  * Product pages are identified by the presence of:
- *   <meta property="og:type" content="product">
+ *   <meta name="template" content="pdp">
  *
  * Product data is fetched from Adobe Commerce Catalog Services via GraphQL.
  */
@@ -24,8 +24,8 @@ import { formatPrice } from '../lib/html.mjs';
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Meta tag used to identify product pages in the HTML response. */
-const PRODUCT_META = '<meta property="og:type" content="product">';
+/** Marker meta for PDP HTML (must match authoring / default-query head meta). */
+const PDP_TEMPLATE_META = '<meta name="template" content="pdp">';
 
 /** The AEM block class name to target for HTML injection. */
 const BLOCK_CLASS = 'product-details';
@@ -204,6 +204,7 @@ function buildProductMetadata({ product }, pageUrl) {
     ['name', 'title', title],
     ['name', 'description', metaDescription],
     ['name', 'keywords', metaKeyword],
+    ['property', 'og:type', 'product'],
     ['property', 'og:description', shortDescription],
     ['property', 'og:title', title],
     ['property', 'og:url', pageUrl],
@@ -273,7 +274,7 @@ export async function injectProductDetails(response, pathname, env) {
   }
 
   let html = await response.text();
-  if (!html.includes(PRODUCT_META)) {
+  if (!html.includes(PDP_TEMPLATE_META)) {
     return new Response(html, response);
   }
 
