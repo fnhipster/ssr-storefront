@@ -1,0 +1,21 @@
+{
+  "private": true,
+  "name": "aem-ssr-fastly-worker",
+  "version": "1.0.0",
+  "description": "AEM Edge Delivery Fastly Compute Worker with SSR injection",
+  "module": "./src/index.mjs",
+  "scripts": {
+    "build": "js-compute-runtime src/index.mjs bin/main.wasm",
+    "deploy": "fastly compute deploy",
+    "dev": "fastly compute serve"
+  },
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@fastly/js-compute": "^3.0.0"
+  },
+  "dependencies": {
+    "@dropins/storefront-pdp": "^3.0.2",
+    "@dropins/storefront-product-discovery": "^3.1.0",
+    "@dropins/tools": "^1.8.0"
+  }
+}

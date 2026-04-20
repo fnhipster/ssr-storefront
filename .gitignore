@@ -12,3 +12,4 @@ helix-importer-ui
 scripts/__dropins__/**/*.map
 .env
 .wrangler
+.claude

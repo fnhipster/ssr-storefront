@@ -13,12 +13,12 @@
 import { ProductView } from '@dropins/storefront-product-discovery/fragments';
 import {
   defineInjector, jsonLd, metadata, block,
-} from '../lib/injector.mjs';
-import { fetchCommerce, buildAvailability, formatOfferPrice } from '../lib/commerce.mjs';
-import { extractBlockRowValue } from '../lib/template.mjs';
-import { buildCardListRows } from '../lib/block-list.mjs';
-import { absoluteUrl, titleCaseSegment } from '../lib/url.mjs';
-import { formatPrice } from '../lib/html.mjs';
+} from '../injector.mjs';
+import { fetchCommerce, buildAvailability, formatOfferPrice } from '../commerce.mjs';
+import { extractBlockRowValue } from '../template.mjs';
+import { buildCardListRows } from '../block-list.mjs';
+import { absoluteUrl, titleCaseSegment } from '../url.mjs';
+import { formatPrice } from '../html.mjs';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -36,7 +36,6 @@ const VISIBILITY_FILTER = {
 // GraphQL
 // ---------------------------------------------------------------------------
 
-/** Fields required for schema.org ItemList / Product entries. */
 const CATEGORY_PRODUCT_SEARCH = /* GraphQL */ `
   query categoryProductSearch(
     $phrase: String!
@@ -74,9 +73,6 @@ function mapProductViewForLd(pv, origin) {
     : pv.price?.final?.amount;
   const imageRaw = pv.images?.find((im) => im.roles?.includes('image'))?.url
     || pv.images?.[0]?.url;
-  const productUrl = pv.url
-    ? absoluteUrl(origin, pv.url)
-    : absoluteUrl(origin, `/products/${pv.urlKey}/${String(pv.sku).toLowerCase()}`);
 
   return {
     name: pv.name,

@@ -1,0 +1,26 @@
+name = "aem-ssr-fastly-worker"
+language = "javascript"
+manifest_version = 2
+
+[scripts]
+  build = "npm run build"
+
+[setup.backends.aem_origin]
+  address = "ssr--ssr-storefront--fnhipster.aem.live"
+  port = 443
+
+[local_server.backends.aem_origin]
+  url = "https://ssr--ssr-storefront--fnhipster.aem.live"
+  override_host = "ssr--ssr-storefront--fnhipster.aem.live"
+
+[local_server.config_stores.aem_ssr_config]
+  format = "inline-toml"
+
+  [local_server.config_stores.aem_ssr_config.contents]
+    COMMERCE_GRAPHQL_ENDPOINT = "https://www.aemshop.net/cs-graphql"
+    COMMERCE_API_KEY = "4dfa19c9fe6f4cccade55cc5b3da94f7"
+    MAGENTO_CUSTOMER_GROUP = "b6589fc6ab0dc82cf12099d1c2d40ab994e8410c"
+    MAGENTO_ENVIRONMENT_ID = "f38a0de0-764b-41fa-bd2c-5bc2f3c7b39a"
+    MAGENTO_STORE_CODE = "main_website_store"
+    MAGENTO_STORE_VIEW_CODE = "default"
+    MAGENTO_WEBSITE_CODE = "base"

@@ -10,8 +10,8 @@
  * governing permissions and limitations under the License.
  */
 
-import pdpInjector from './injectors/product-details.mjs';
-import plpInjector from './injectors/category-page.mjs';
+import pdpInjector from '../../injectors/product-details.mjs';
+import plpInjector from '../../injectors/category-page.mjs';
 
 const INJECTORS = [plpInjector, pdpInjector];
 
@@ -27,16 +27,11 @@ const isRUMRequest = (url) => /\/\.(rum|optel)\/.*/.test(url.pathname);
 const handleRequest = async (request, env, _ctx) => {
   const url = new URL(request.url);
   if (url.port && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
-    // Cloudflare opens a couple more ports than 443, so we redirect visitors
-    // to the default port to avoid confusion.
-    // https://developers.cloudflare.com/fundamentals/reference/network-ports/#network-ports-compatible-with-cloudflares-proxy
     const redirectTo = new URL(request.url);
     redirectTo.port = '';
     return new Response(`Moved permanently to ${redirectTo.href}`, {
       status: 301,
-      headers: {
-        location: redirectTo.href,
-      },
+      headers: { location: redirectTo.href },
     });
   }
 
@@ -51,26 +46,18 @@ const handleRequest = async (request, env, _ctx) => {
   }
 
   const extension = getExtension(url.pathname);
-
-  // remember original search params
   const savedSearch = url.search;
-
-  // sanitize search params
   const { searchParams } = url;
+
   if (isMediaRequest(url)) {
     [...searchParams.keys()].forEach((key) => {
-      if (!['format', 'height', 'optimize', 'width'].includes(key)) {
-        searchParams.delete(key);
-      }
+      if (!['format', 'height', 'optimize', 'width'].includes(key)) searchParams.delete(key);
     });
   } else if (extension === 'json') {
     [...searchParams.keys()].forEach((key) => {
-      if (!['limit', 'offset', 'sheet'].includes(key)) {
-        searchParams.delete(key);
-      }
+      if (!['limit', 'offset', 'sheet'].includes(key)) searchParams.delete(key);
     });
   } else {
-    // neither media nor json request: strip search params
     url.search = '';
   }
   searchParams.sort();
@@ -78,9 +65,7 @@ const handleRequest = async (request, env, _ctx) => {
   url.hostname = env.ORIGIN_HOSTNAME;
   url.protocol = 'https:';
   url.port = '';
-  // if (!url.origin.match(/^https:\/\/main--.*--.*\.(?:aem|hlx)\.live/)) {
-  //   return new Response('Invalid ORIGIN_HOSTNAME', { status: 500 });
-  // }
+
   const req = new Request(url, request);
   req.headers.set('x-forwarded-host', req.headers.get('host'));
   req.headers.set('x-byo-cdn-type', 'cloudflare');
@@ -90,14 +75,14 @@ const handleRequest = async (request, env, _ctx) => {
   if (env.ORIGIN_AUTHENTICATION) {
     req.headers.set('authorization', `token ${env.ORIGIN_AUTHENTICATION}`);
   }
+
   let resp = await fetch(req, {
     method: req.method,
-    cf: {
-      // cf doesn't cache html by default: need to override the default behavior
-      cacheEverything: true,
-    },
+    cf: { cacheEverything: true },
   });
+
   resp = new Response(resp.body, resp);
+
   if (resp.status === 301 && savedSearch) {
     const location = resp.headers.get('location');
     if (location && !location.match(/\?.*$/)) {
@@ -105,16 +90,17 @@ const handleRequest = async (request, env, _ctx) => {
     }
   }
   if (resp.status === 304) {
-    // 304 Not Modified - remove CSP header
     resp.headers.delete('Content-Security-Policy');
   }
   resp.headers.delete('age');
   resp.headers.delete('x-robots-tag');
+
   const injectorCtx = { pathname: url.pathname, env, origin: url.origin };
   resp = await INJECTORS.reduce(
     async (prev, injector) => injector(await prev, injectorCtx),
     Promise.resolve(resp),
   );
+
   return resp;
 };
 

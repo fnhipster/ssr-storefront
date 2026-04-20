@@ -16,9 +16,9 @@
 import { PRODUCT_FRAGMENT } from '@dropins/storefront-pdp/fragments';
 import {
   defineInjector, jsonLd, metadata, initialData, block,
-} from '../lib/injector.mjs';
-import { fetchCommerce, buildAvailability } from '../lib/commerce.mjs';
-import { formatPrice } from '../lib/html.mjs';
+} from '../injector.mjs';
+import { fetchCommerce, buildAvailability } from '../commerce.mjs';
+import { formatPrice } from '../html.mjs';
 
 // ---------------------------------------------------------------------------
 // GraphQL
@@ -50,19 +50,11 @@ const PRODUCT_QUERY = /* GraphQL */ `
 // Data fetching
 // ---------------------------------------------------------------------------
 
-/**
- * Extracts the product SKU from the last segment of the URL pathname.
- * Expects the pattern: /products/{urlKey}/{sku}
- */
 function extractSku(pathname) {
   const segments = pathname.split('/').filter(Boolean);
   return segments.at(-1) || null;
 }
 
-/**
- * @param {{ pathname: string, env: object }} ctx
- * @returns {Promise<{ product: object, variants: object[] }|null>}
- */
 async function fetchProductData({ pathname, env }) {
   const sku = extractSku(pathname);
   if (!sku) return null;
@@ -161,14 +153,6 @@ function buildProductMetadata({ product }) {
 // Block HTML
 // ---------------------------------------------------------------------------
 
-/**
- * Builds the product-details block rows.
- * Each entry is a [label, value] pair rendered as an AEM block row.
- *
- * Add, remove, or reorder rows here to change the server-rendered output.
- *
- * @returns {Array<[string, *]>}
- */
 function buildProductBlockRows({ product }) {
   const amount = product.priceRange?.minimum?.final?.amount
     || product.price?.final?.amount;
