@@ -21,7 +21,7 @@ The PDP initializer (`scripts/initializers/pdp.js`) checks `window.__INITIAL_DAT
 
 The key format is `PDP:{sku}` where `{sku}` is the product SKU extracted from the last path segment of the page URL (e.g. for `/products/tshirt/MH01`, the key is `PDP:MH01`).
 
-The data must conform to the shape returned by the Commerce Catalog Services `PRODUCT_FRAGMENT` — the same shape `fetchProductData` returns.
+The data must conform to the shape defined by `PRODUCT_FRAGMENT` from `@dropins/storefront-pdp/fragments` — the same shape `fetchProductData` returns. The producer of this data must use the **same version** of `@dropins/storefront-pdp` as this project (see `package.json`), since the fragment definition and the expected data shape are version-coupled.
 
 <!-- ### Local Storage
 
