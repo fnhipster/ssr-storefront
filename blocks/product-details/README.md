@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Product Details block provides comprehensive product detail page functionality using multiple @dropins/storefront-pdp containers. It handles product display, configuration, cart operations, wishlist integration, and SEO optimization with dynamic mode switching between add and update operations.
+The Product Details block provides comprehensive product detail page functionality using multiple @dropins/storefront-pdp containers. It handles product display, configuration, cart operations, and wishlist integration with dynamic mode switching between add and update operations.
 
 ## Integration
 
@@ -14,6 +14,14 @@ No block configuration is read via `readBlockConfig()`. The block uses dynamic p
 
 - `itemUid` - Item UID for cart update mode (when present, enables update mode instead of add mode)
 - `optionsUIDs` - Product option UIDs for wishlist context (empty string treated as base product with no options)
+
+### Initial Data
+
+The PDP initializer (`scripts/initializers/pdp.js`) checks `window.__INITIAL_DATA__['PDP:{sku}']` before making any network request. If the key is present when the initializer runs, its `.product` value is used directly and no Commerce API fetch is made for the product data. This eliminates the product data network round-trip on page load.
+
+The key format is `PDP:{sku}` where `{sku}` is the product SKU extracted from the last path segment of the page URL (e.g. for `/products/tshirt/MH01`, the key is `PDP:MH01`).
+
+The data must conform to the shape returned by the Commerce Catalog Services `PRODUCT_FRAGMENT` — the same shape `fetchProductData` returns.
 
 <!-- ### Local Storage
 
@@ -27,7 +35,6 @@ No localStorage keys are used by this block. -->
 - `events.on('pdp/values', callback)` - Listens for product option value changes to update wishlist context
 - `events.on('wishlist/alert', callback)` - Listens for wishlist action alerts to show notifications
 - `events.on('cart/data', callback)` - Listens for cart data changes to determine update mode
-- `events.on('aem/lcp', callback)` - Listens for AEM LCP event to set JSON-LD and meta tags
 
 <!-- #### Event Emitters
 
@@ -49,12 +56,10 @@ No events are emitted by this block. -->
 3. **Add to Cart**: Users can add products to cart or update existing cart items
 4. **Wishlist Management**: Users can add/remove products from wishlist
 5. **Image Gallery**: Users can view product images in desktop thumbnail or mobile carousel format
-6. **SEO Optimization**: Sets JSON-LD structured data and meta tags for search engines
 
 ### Error Handling
 
 - **Configuration Errors**: If product configuration is invalid, disables add to cart button
 - **API Errors**: If cart operations fail, shows error alerts with dismiss functionality
 - **Image Rendering Errors**: If product images fail to load, the image slots handle fallback behavior
-- **JSON-LD Errors**: If structured data generation fails, falls back to basic meta tags
 - **Fallback Behavior**: Always falls back to appropriate mode based on URL parameters and cart state
