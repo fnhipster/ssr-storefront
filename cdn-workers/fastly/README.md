@@ -6,9 +6,9 @@ Use this as a starting point or as a guide when adding the injectors to your own
 
 ## Prerequisites
 
-Complete the [AEM Fastly Setup](https://www.aem.live/docs/byo-cdn-fastly-setup) before using this worker.
+Complete the [AEM Fastly Setup](https://www.aem.live/docs/byo-cdn-fastly-setup) before using this worker. This file shows the resulting worker with the SSR injection pipeline layered on top.
 
-> **Note:** VCL and Compute cannot coexist on the same Fastly service. If you followed the standard guide using VCL snippets, create a new **Compute** service for this worker. The AEM-required headers set by those VCL snippets (`X-BYO-CDN-Type`, `X-Push-Invalidation`) are handled directly in [`src/index.mjs`](src/index.mjs).
+> **Note:** The AEM-required headers set by the guide's VCL snippets (`X-BYO-CDN-Type`, `X-Push-Invalidation`) are handled directly in [`src/index.mjs`](src/index.mjs).
 
 Install the Fastly CLI:
 
@@ -36,7 +36,7 @@ In the Fastly UI, create the following stores:
 
 | Secret | Description |
 |---|---|
-| `COMMERCE_API_KEY` | Adobe Commerce API key (encrypted at rest) |
+| `COMMERCE_API_KEY` | Adobe Commerce API key — required for Catalog Services; leave empty for ACCS (encrypted at rest) |
 
 **Config Store** — name: `aem_ssr_config`
 
@@ -53,11 +53,31 @@ In the Fastly UI, create the following stores:
 
 ## Development
 
-Fill in the `[local_server]` sections in `fastly.toml`, then:
-
 ```bash
 npm run dev
 ```
+
+`fastly compute serve` requires `[local_server]` entries in `fastly.toml` to stand in for the production backend and config store. Add the following, substituting your own values:
+
+```toml
+[local_server.backends.aem_origin]
+  url = "https://main--{site}--{org}.aem.live"
+  override_host = "main--{site}--{org}.aem.live"
+
+[local_server.config_stores.aem_ssr_config]
+  format = "inline-toml"
+
+  [local_server.config_stores.aem_ssr_config.contents]
+    COMMERCE_GRAPHQL_ENDPOINT = "..."
+    COMMERCE_API_KEY = "..."
+    MAGENTO_ENVIRONMENT_ID = "..."
+    MAGENTO_STORE_CODE = "..."
+    MAGENTO_STORE_VIEW_CODE = "..."
+    MAGENTO_WEBSITE_CODE = "..."
+    MAGENTO_CUSTOMER_GROUP = "..."
+```
+
+`override_host` is required — without it Fastly sends the request with `Host: localhost`, which AEM rejects. Secret Stores are not emulated locally, so `COMMERCE_API_KEY` goes in the config store for dev.
 
 ## Deployment
 

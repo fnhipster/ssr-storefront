@@ -15,7 +15,7 @@ Every AEM Edge Delivery project requires a CDN worker before going live. Follow 
 - **Cloudflare** — [byo-cdn-cloudflare-worker-setup](https://www.aem.live/docs/byo-cdn-cloudflare-worker-setup)
 - **Fastly** — [byo-cdn-fastly-setup](https://www.aem.live/docs/byo-cdn-fastly-setup)
 
-Complete this step first. The injectors are added on top of that worker.
+Complete this step first. The following steps add the SSR layer on top of the worker you set up there.
 
 ---
 
@@ -39,13 +39,19 @@ injectors/
   category-page.mjs     # PLP injector (template: plp)
 ```
 
+Then install the npm packages the injectors depend on:
+
+```bash
+npm install @dropins/storefront-pdp @dropins/storefront-product-discovery
+```
+
 > See the [`cloudflare/`](cloudflare/) and [`fastly/`](fastly/) directories for complete reference implementations of a worker that already has these files wired up.
 
 ---
 
 ### 3. Import and register the injectors
 
-In your worker's main entry file (e.g. `src/index.mjs`), import the injectors and add the pipeline after your origin fetch.
+In your worker's entry file, import the injectors and add the pipeline after your origin fetch.
 
 **Add the imports at the top:**
 
@@ -82,7 +88,7 @@ The `env` object passed to `injectorCtx` must include the Commerce credentials f
 | Variable | Description |
 |---|---|
 | `COMMERCE_GRAPHQL_ENDPOINT` | Adobe Commerce Catalog Services GraphQL URL |
-| `COMMERCE_API_KEY` | Adobe Commerce API key |
+| `COMMERCE_API_KEY` | Adobe Commerce API key — required for Catalog Services (`x-api-key` header); leave empty for ACCS (authenticates via tenant ID in the endpoint URL) |
 | `MAGENTO_ENVIRONMENT_ID` | Commerce environment ID |
 | `MAGENTO_STORE_CODE` | Store code |
 | `MAGENTO_STORE_VIEW_CODE` | Store view code |
